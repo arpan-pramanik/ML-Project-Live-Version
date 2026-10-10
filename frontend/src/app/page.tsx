@@ -156,16 +156,16 @@ export default function ControlPanel() {
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetrySnapshot | null>(null);
   const [datasets, setDatasets] = useState<Array<{ id: string; name: string; type: string }>>([
-    { id: "coinbase_btc", name: "🔴 LIVE FEED: Coinbase BTC/USD WebSocket", type: "Live Exchange" },
-    { id: "coinbase_eth", name: "🔴 LIVE FEED: Coinbase ETH/USD WebSocket", type: "Live Exchange" },
-    { id: "sea", name: "SEA Concepts Benchmark (10,000 Samples)", type: "Synthetic Abrupt" },
-    { id: "agrawal", name: "Agrawal Stream Benchmark (10,000 Samples)", type: "Synthetic Subspace" },
-    { id: "electricity", name: "NSW Electricity Market (45,312 Samples)", type: "Real Recurring" },
-    { id: "covertype", name: "Forest Covertype Stream (30,000 Samples)", type: "Real Multi-Class" },
-    { id: "airlines", name: "Airlines Flight Delay Stream (15,000 Samples)", type: "Real Shift" },
-    { id: "hf_adult", name: "Hugging Face: Adult Census Income (32,561 Samples)", type: "Hugging Face" },
-    { id: "hf_bank", name: "Hugging Face: Bank Marketing Stream (10,578 Samples)", type: "Hugging Face" },
-    { id: "hf_credit", name: "Hugging Face: Credit Default Risk (13,272 Samples)", type: "Hugging Face" },
+    { id: "coinbase_btc", name: "Coinbase BTC/USD Live WebSocket", type: "Live Exchange Feed" },
+    { id: "coinbase_eth", name: "Coinbase ETH/USD Live WebSocket", type: "Live Exchange Feed" },
+    { id: "sea", name: "SEA Concepts Benchmark (5,000 Samples)", type: "Synthetic Abrupt Drift" },
+    { id: "agrawal", name: "Agrawal Benchmark (5,000 Samples)", type: "Synthetic Subspace Drift" },
+    { id: "electricity", name: "NSW Electricity Market (10,000 Samples)", type: "Real Recurring Concept" },
+    { id: "covertype", name: "Forest Covertype Stream (10,000 Samples)", type: "Real Multi-Class Shift" },
+    { id: "airlines", name: "Airlines Flight Delay Stream (2,000 Samples)", type: "Real Distribution Drift" },
+    { id: "hf_adult", name: "Hugging Face: Adult Census Income (10k)", type: "Hugging Face Stream" },
+    { id: "hf_bank", name: "Hugging Face: Bank Marketing Stream (10k)", type: "Hugging Face Stream" },
+    { id: "hf_credit", name: "Hugging Face: Credit Default Risk (10k)", type: "Hugging Face Stream" },
   ]);
 
   const [selectedDataset, setSelectedDataset] = useState("coinbase_btc");
@@ -174,14 +174,15 @@ export default function ControlPanel() {
   const [warmup, setWarmup] = useState(20);
   const [windowSize, setWindowSize] = useState(50);
 
-  const [showAddDataset, setShowAddDataset] = useState(false);
+  const [showConfigDrawer, setShowConfigDrawer] = useState(false);
+  const [showLogsDrawer, setShowLogsDrawer] = useState(false);
   const [hfInput, setHfInput] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
   const [exportNotice, setExportNotice] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logConsoleRef = useRef<HTMLDivElement>(null);
 
-  // Poll hardware
+  // Poll hardware stats
   const fetchHardware = async () => {
     try {
       const res = await fetch("/api/hardware");
@@ -203,7 +204,7 @@ export default function ControlPanel() {
         setTelemetry(data);
       }
     } catch (err) {
-      console.warn("Telemetry status polling failed:", err);
+      console.warn("Telemetry polling failed:", err);
     }
   };
 
@@ -216,7 +217,7 @@ export default function ControlPanel() {
         if (data.datasets) setDatasets(data.datasets);
       }
     } catch (err) {
-      console.warn("Datasets list fetch failed:", err);
+      console.warn("Datasets fetch failed:", err);
     }
   };
 
@@ -226,7 +227,7 @@ export default function ControlPanel() {
     fetchDatasets();
 
     const hwInterval = setInterval(fetchHardware, 4000);
-    const telInterval = setInterval(fetchTelemetry, 700);
+    const telInterval = setInterval(fetchTelemetry, 600);
 
     return () => {
       clearInterval(hwInterval);
@@ -256,55 +257,34 @@ export default function ControlPanel() {
       });
       if (!res.ok) {
         const err = await res.json();
-        alert("Execution error: " + (err.message || "Failed to start"));
+        alert("Execution Error: " + (err.message || "Failed to start pipeline"));
       } else {
-        fetchTelemetry();
+        setShowConfigDrawer(false);
       }
-    } catch (e) {
-      alert("Network error: " + e);
+    } catch (err) {
+      alert("Network Error: Could not connect to ML backend.");
     }
   };
 
   const handleStop = async () => {
     try {
       await fetch("/api/stop", { method: "POST" });
-      fetchTelemetry();
     } catch (err) {
-      console.warn("Stop command failed:", err);
-    }
-  };
-
-  const handleUploadHf = async () => {
-    if (!hfInput.trim()) return alert("Enter a Hugging Face dataset identifier");
-    setUploadStatus("Importing from Hugging Face Hub...");
-    try {
-      const res = await fetch("/api/upload_dataset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hf_id: hfInput.trim() }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setUploadStatus(`Success! Imported ${data.rows.toLocaleString()} instances. Selected and ready.`);
-        await fetchDatasets();
-        setSelectedDataset("custom");
-      } else {
-        setUploadStatus("Error: " + data.message);
-      }
-    } catch (e) {
-      setUploadStatus("Error: " + e);
+      console.error(err);
     }
   };
 
   const handleUploadCsv = async () => {
-    const file = fileInputRef.current?.files?.[0];
-    if (!file) return alert("Select a CSV file first");
-
-    setUploadStatus("Reading CSV file...");
+    if (!fileInputRef.current?.files?.[0]) {
+      alert("Please choose a CSV file first.");
+      return;
+    }
+    const file = fileInputRef.current.files[0];
     const reader = new FileReader();
     reader.onload = async (e) => {
       const content = e.target?.result as string;
       try {
+        setUploadStatus("Uploading & validating CSV stream...");
         const res = await fetch("/api/upload_dataset", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -312,20 +292,45 @@ export default function ControlPanel() {
         });
         const data = await res.json();
         if (res.ok) {
-          setUploadStatus(`Success! Loaded ${data.rows.toLocaleString()} instances (${data.columns.length} columns). Proceed to run.`);
-          await fetchDatasets();
+          setUploadStatus(`Ready: Loaded ${data.rows} samples with ${data.columns.length} columns.`);
+          fetchDatasets();
           setSelectedDataset("custom");
         } else {
-          setUploadStatus("Error: " + data.message);
+          setUploadStatus("Upload failed: " + data.message);
         }
       } catch (err) {
-        setUploadStatus("Error: " + err);
+        setUploadStatus("Upload network error.");
       }
     };
     reader.readAsText(file);
   };
 
-  const triggerExport = async (format: "json" | "summary_csv" | "trajectory_csv" | "modifications_csv" | "logs") => {
+  const handleUploadHf = async () => {
+    if (!hfInput.trim()) {
+      alert("Enter a valid Hugging Face dataset identifier.");
+      return;
+    }
+    try {
+      setUploadStatus("Importing dataset from Hugging Face Hub...");
+      const res = await fetch("/api/upload_dataset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hf_id: hfInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setUploadStatus(`Imported ${data.rows} samples with ${data.columns.length} features.`);
+        fetchDatasets();
+        setSelectedDataset("custom");
+      } else {
+        setUploadStatus("Hugging Face import error: " + data.message);
+      }
+    } catch (err) {
+      setUploadStatus("Hugging Face network error.");
+    }
+  };
+
+  const triggerExport = async (format: string) => {
     try {
       const res = await fetch(`/api/export?format=${format}`);
       if (res.ok) {
@@ -345,55 +350,12 @@ export default function ControlPanel() {
         a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
-        setExportNotice(`DOWNLOADED: ${filename}`);
+        setExportNotice(`Exported ${filename}`);
         setTimeout(() => setExportNotice(""), 4000);
-        return;
       }
     } catch (err) {
-      console.warn("API export failed, using client-side generator:", err);
+      console.warn("API export failed:", err);
     }
-
-    // Client-side fallback if API is not yet reloaded or offline
-    if (!telemetry) return;
-    let content = "";
-    let mimeType = "text/plain";
-    let filename = `export_${Date.now()}`;
-    const dName = telemetry.dataset_name || "stream";
-    const mName = telemetry.model_name || "model";
-
-    if (format === "json") {
-      content = JSON.stringify(telemetry, null, 2);
-      mimeType = "application/json";
-      filename = `full_telemetry_${dName}_${mName}_${Date.now()}.json`;
-    } else if (format === "summary_csv") {
-      content = `timestamp,dataset,model,detector,device,current_sample,total_samples,cumulative_accuracy_pct,window_accuracy_pct,f1_score_pct,drift_signals,adaptations_count,throughput\n${new Date().toISOString()},${dName},${mName},${telemetry.detector_name},${telemetry.device},${telemetry.current_sample},${telemetry.total_samples},${telemetry.accuracy},${telemetry.window_accuracy},${telemetry.f1_score},${telemetry.drift_count},${telemetry.adaptation_count},${telemetry.throughput}\n`;
-      mimeType = "text/csv";
-      filename = `summary_${dName}_${mName}_${Date.now()}.csv`;
-    } else if (format === "trajectory_csv") {
-      content = "sample,cumulative_accuracy_pct,window_accuracy_pct,f1_score_pct,drift_signal\n" +
-        (telemetry.trajectory || []).map(p => `${p.sample},${p.cumulative_acc},${p.window_acc},${p.f1},${p.drift}`).join("\n");
-      mimeType = "text/csv";
-      filename = `trajectory_${dName}_${mName}_${Date.now()}.csv`;
-    } else if (format === "modifications_csv") {
-      content = "sample_index,event,components_affected,adaptation_latency_ms,device\n" +
-        (telemetry.component_modifications || []).map(m => `${m.sample_index},"${m.event}",${m.components_affected},${m.adaptation_latency_ms},"${m.device}"`).join("\n");
-      mimeType = "text/csv";
-      filename = `audit_${dName}_${mName}_${Date.now()}.csv`;
-    } else if (format === "logs") {
-      content = (telemetry.logs || []).map(l => `[${l.timestamp}] [${l.level}] ${l.message}`).join("\n");
-      mimeType = "text/plain";
-      filename = `logs_${dName}_${mName}_${Date.now()}.txt`;
-    }
-
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    setExportNotice(`DOWNLOADED: ${filename}`);
-    setTimeout(() => setExportNotice(""), 4000);
   };
 
   // Trajectory SVG calculations
@@ -413,6 +375,7 @@ export default function ControlPanel() {
 
   let dCum = "";
   let dWin = "";
+  let dArea = "";
   const driftLines: number[] = [];
 
   trajectory.forEach((pt, i) => {
@@ -423,9 +386,11 @@ export default function ControlPanel() {
     if (i === 0) {
       dCum += `M ${x} ${yC}`;
       dWin += `M ${x} ${yW}`;
+      dArea += `M ${x} ${padTop + plotH} L ${x} ${yC}`;
     } else {
       dCum += ` L ${x} ${yC}`;
       dWin += ` L ${x} ${yW}`;
+      dArea += ` L ${x} ${yC}`;
     }
 
     if (pt.drift === 1) {
@@ -433,110 +398,185 @@ export default function ControlPanel() {
     }
   });
 
-  const stages = [
-    { id: "IDLE", label: "1. STANDBY" },
-    { id: "DATA_LOAD", label: "2. DATA INGESTION" },
-    { id: "WARMUP_TRAINING", label: "3. WARMUP TRAINING" },
-    { id: "STREAMING_PREQUENTIAL", label: "4. STREAM SCORING" },
-    { id: "DRIFT_ADAPTING", label: "5. DRIFT & ADAPTATION" },
-    { id: "COMPLETED", label: "6. COMPLETED" },
-  ];
+  if (trajectory.length > 0) {
+    const lastX = getX(trajectory[trajectory.length - 1].sample);
+    dArea += ` L ${lastX} ${padTop + plotH} Z`;
+  }
 
+  const isLiveStream = selectedDataset.startsWith("coinbase") || Boolean(telemetry?.live_stream_status?.running);
   const currentStage = telemetry?.stage || "IDLE";
 
   return (
-    <div className="max-w-[1500px] mx-auto flex flex-col gap-3 text-[12px] bg-white text-black p-3">
-      {/* Top Hardware Telemetry */}
-      <div className="border border-black p-2.5 bg-white">
-        <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 flex justify-between items-center text-[11px]">
-          <span>HARDWARE & COMPUTE ENGINE TELEMETRY</span>
-          <span className="font-bold">ACTIVE BINDING: {telemetry?.device || "STANDBY"}</span>
-        </div>
-        <div className="grid grid-cols-4 gap-2.5">
-          <div className="border border-black p-2">
-            <div className="text-[10px] uppercase text-neutral-600">CPU ARCHITECTURE</div>
-            <div className="text-[13px] font-bold mt-0.5">{hardware?.cpu?.model || "Detecting CPU..."}</div>
-            <div className="text-[10px] text-neutral-600">
-              {hardware?.cpu?.threads ? `${hardware.cpu.threads} Execution Threads` : "Querying threads..."}
-            </div>
+    <div className="min-h-screen bg-[#090d16] text-slate-100 p-4 md:p-6 flex flex-col gap-5">
+      {/* 1. Header & Navigation Bar */}
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#0f172a] border border-[#1e293b] rounded-xl px-5 py-3.5 shadow-lg">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-lg bg-gradient-to-tr from-indigo-600 via-cyan-500 to-emerald-400 flex items-center justify-center font-black text-white text-xl tracking-tight shadow-md">
+            AT
           </div>
-          <div className="border border-black p-2">
-            <div className="text-[10px] uppercase text-neutral-600">SYSTEM MEMORY (RAM)</div>
-            <div className="text-[13px] font-bold mt-0.5">
-              {hardware ? `${(hardware.cpu.ram_used_mb / 1024).toFixed(1)} / ${(hardware.cpu.ram_total_mb / 1024).toFixed(1)} GB` : "Querying RAM..."}
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold tracking-tight text-white">ATREUS STREAMING PLATFORM</h1>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                v2026.4
+              </span>
             </div>
-            <div className="text-[10px] text-neutral-600">Util: {hardware?.cpu?.ram_util_pct || 0}%</div>
-          </div>
-          <div className="border border-black p-2">
-            <div className="text-[10px] uppercase text-neutral-600">GPU ACCELERATOR</div>
-            <div className="text-[13px] font-bold mt-0.5">{hardware?.gpu?.model || "Detecting GPU..."}</div>
-            <div className="text-[10px] text-neutral-600">
-              CUDA: {hardware?.gpu?.cuda_available ? "READY (DEVICE 0)" : "INITIALIZING"}
-            </div>
-          </div>
-          <div className="border border-black p-2">
-            <div className="text-[10px] uppercase text-neutral-600">GPU VRAM & LOAD</div>
-            <div className="text-[13px] font-bold mt-0.5">
-              {hardware ? `${hardware.gpu.vram_used_mb} / ${hardware.gpu.vram_total_mb} MiB` : "Querying VRAM..."}
-            </div>
-            <div className="text-[10px] text-neutral-600">Core Load: {hardware?.gpu?.gpu_util_pct || 0}%</div>
+            <p className="text-xs text-slate-400">
+              Online Machine Learning & Adaptive Concept Drift Architecture
+            </p>
           </div>
         </div>
-      </div>
 
-      {/* Pipeline Stage Bar */}
-      <div className="flex border border-black text-[10px] uppercase">
-        {stages.map((st) => {
-          const isActive = currentStage === st.id;
-          return (
-            <div
-              key={st.id}
-              className={`flex-1 p-1.5 text-center border-r last:border-r-0 border-black ${
-                isActive ? "bg-black text-white font-bold" : "bg-white text-black"
-              }`}
-            >
-              {st.label}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Live Market WebSocket Status Banner */}
-      {(selectedDataset.startsWith("coinbase") || telemetry?.live_stream_status?.running) && (
-        <div className="border border-black p-2.5 bg-black text-white flex justify-between items-center text-[11px]">
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 font-bold uppercase tracking-wide">
-              <span className={`inline-block w-2.5 h-2.5 rounded-full ${telemetry?.live_stream_status?.connected ? "bg-emerald-400 animate-pulse" : "bg-neutral-500"}`} />
-              COINBASE WEBSOCKET: {telemetry?.live_stream_status?.product_id || (selectedDataset.includes("eth") ? "ETH-USD" : "BTC-USD")}
+        {/* Live Hardware & Telemetry Bar */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center gap-2 bg-[#1e293b]/70 border border-[#334155] rounded-lg px-3 py-1.5 text-xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-slate-300 font-medium">
+              {hardware?.cpu ? `${hardware.cpu.threads} CPU Threads` : "CPU Active"}
             </span>
-            <span className="text-neutral-500">|</span>
-            <span className="font-bold text-emerald-400 text-[14px]">
-              ${telemetry?.live_stream_status?.latest_price ? telemetry.live_stream_status.latest_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "WAITING TICK..."}
+            <span className="text-slate-600">|</span>
+            <span className="text-cyan-400 font-medium">
+              {hardware?.gpu?.cuda_available ? `${hardware.gpu.model} (CUDA)` : "CPU Stream Mode"}
             </span>
-            <span className="text-neutral-500">|</span>
-            <span>TICKS: {(telemetry?.live_stream_status?.total_ticks || 0).toLocaleString()}</span>
-            <span>VELOCITY: {telemetry?.live_stream_status?.tick_rate || 0} ticks/sec</span>
           </div>
+
           <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase font-mono text-neutral-300">
-              STATUS: {telemetry?.live_stream_status?.connected ? "CONNECTED (PUBLIC FEED)" : (telemetry?.running ? "CONNECTING..." : "DISCONNECTED")}
-            </span>
+            {!telemetry?.running ? (
+              <button
+                type="button"
+                onClick={handleStart}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs uppercase tracking-wide transition shadow-md hover:shadow-emerald-500/25 cursor-pointer"
+              >
+                <span>▶</span> Start Stream
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStop}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs uppercase tracking-wide transition shadow-md hover:shadow-rose-600/25 cursor-pointer"
+              >
+                <span>⏹</span> Halt Stream
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowConfigDrawer(!showConfigDrawer)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#1e293b] hover:bg-[#334155] text-slate-200 text-xs font-semibold border border-[#334155] transition cursor-pointer"
+            >
+              <span>⚙</span> Configure
+            </button>
+
+            <button
+              type="button"
+              onClick={() => triggerExport("json")}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#1e293b] hover:bg-[#334155] text-slate-200 text-xs font-semibold border border-[#334155] transition cursor-pointer"
+            >
+              <span>↓</span> Export
+            </button>
           </div>
         </div>
-      )}
+      </header>
 
-      {/* Main Grid: Config & Primary Metrics */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* Configuration */}
-        <div className="border border-black p-2.5 bg-white">
-          <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 text-[11px]">
-            STREAM & MODEL CONFIGURATION
-          </div>
-          <div className="flex flex-col gap-2">
+      {/* 2. Live Market Hero Ribbon (When Coinbase or Live Stream is running) */}
+      <section className="bg-gradient-to-r from-[#0f172a] via-[#131f37] to-[#0f172a] border border-[#1e293b] rounded-xl p-4 shadow-xl">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="flex items-center gap-4">
+            <div className="p-2.5 rounded-xl bg-[#1e293b] border border-[#334155] flex items-center justify-center">
+              <span className="text-2xl">🪙</span>
+            </div>
             <div>
-              <label className="block font-bold uppercase text-[10px] mb-1">Streaming Dataset</label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs uppercase font-bold text-slate-400 tracking-wider">
+                  ACTIVE DATA SOURCE:
+                </span>
+                <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold uppercase">
+                  {isLiveStream ? "LIVE WEBSOCKET STREAM" : "BENCHMARK STREAM"}
+                </span>
+                <span className="text-xs text-slate-300 font-semibold">
+                  {datasets.find((d) => d.id === selectedDataset)?.name || selectedDataset}
+                </span>
+              </div>
+              <div className="flex items-baseline gap-3 mt-1">
+                <span className="text-2xl md:text-3xl font-extrabold tracking-tight text-white font-mono">
+                  {isLiveStream && telemetry?.live_stream_status?.latest_price
+                    ? `$${telemetry.live_stream_status.latest_price.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`
+                    : `Sample #${(telemetry?.current_sample || 0).toLocaleString()}`}
+                </span>
+                {isLiveStream && (
+                  <span className="text-xs font-medium text-slate-400">
+                    Tick Velocity:{" "}
+                    <strong className="text-emerald-400 font-mono">
+                      {telemetry?.live_stream_status?.tick_rate || 0} ticks/sec
+                    </strong>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Real-time State Badges */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="bg-[#1e293b]/90 border border-[#334155] rounded-xl px-3 py-2 text-right">
+              <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                CONCEPT REGIME STATE
+              </div>
+              <div className="text-xs font-bold text-cyan-300">
+                {telemetry?.graph_memory?.nodes?.find((n) => n.is_active)?.label || "Regime #0: Stationary"}
+              </div>
+            </div>
+
+            <div className="bg-[#1e293b]/90 border border-[#334155] rounded-xl px-3 py-2 text-right">
+              <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                DRIFT DETECTOR
+              </div>
+              <div className="flex items-center gap-1.5 justify-end">
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    telemetry?.stage === "DRIFT_ADAPTING"
+                      ? "bg-rose-500 animate-ping"
+                      : "bg-emerald-400"
+                  }`}
+                />
+                <span
+                  className={`text-xs font-bold ${
+                    telemetry?.stage === "DRIFT_ADAPTING" ? "text-rose-400" : "text-emerald-400"
+                  }`}
+                >
+                  {telemetry?.stage === "DRIFT_ADAPTING" ? "DRIFT DETECTED" : "EQUILIBRIUM"}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 3. Stream Configuration Modal/Drawer */}
+      {showConfigDrawer && (
+        <section className="bg-[#0f172a] border border-[#334155] rounded-xl p-5 shadow-2xl animate-in fade-in duration-200">
+          <div className="flex justify-between items-center border-b border-[#1e293b] pb-3 mb-4">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-200 flex items-center gap-2">
+              <span>⚙</span> Stream & Architecture Configuration
+            </h2>
+            <button
+              type="button"
+              onClick={() => setShowConfigDrawer(false)}
+              className="text-slate-400 hover:text-white text-sm px-2 py-0.5 rounded hover:bg-[#1e293b]"
+            >
+              ✕ Close
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+                Target Data Stream
+              </label>
               <select
-                className="w-full border border-black p-1.5 bg-white text-[12px] outline-none"
+                className="w-full bg-[#1e293b] border border-[#334155] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 value={selectedDataset}
                 onChange={(e) => setSelectedDataset(e.target.value)}
               >
@@ -549,453 +589,370 @@ export default function ControlPanel() {
             </div>
 
             <div>
-              <button
-                type="button"
-                className="w-full border border-black p-1.5 font-bold uppercase hover:bg-black hover:text-white"
-                onClick={() => setShowAddDataset(!showAddDataset)}
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+                ML Model Architecture
+              </label>
+              <select
+                className="w-full bg-[#1e293b] border border-[#334155] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
               >
-                {showAddDataset ? "− HIDE DATASET IMPORT" : "+ ADD DATASET (CSV / HUGGING FACE)"}
-              </button>
+                <option value="graph_memory_adaptive">
+                  Graph Memory Concept Topology Adaptive Model (0ms Recall)
+                </option>
+                <option value="drift_moe">
+                  DriftMoE (2026 Mixture of Experts + RTX 5070 CUDA)
+                </option>
+                <option value="proposed">
+                  Proposed Selective Adapt (RF + SVM + Online Scaler)
+                </option>
+                <option value="boosted_forest">
+                  Boosted ARF-DWM Forest (Shadow Trees)
+                </option>
+                <option value="dual_memory">
+                  Self-Healing Dual-Memory Meta-Ensemble
+                </option>
+                <option value="xgboost_cuda">
+                  Hardware-Accelerated Adaptive XGBoost (CUDA)
+                </option>
+                <option value="adaptive_svm">
+                  Adaptive Online SVM (Incremental Margin)
+                </option>
+                <option value="full_retrain">Full Retraining (Baseline)</option>
+                <option value="static">Static Streaming Model (No Adapt)</option>
+              </select>
             </div>
 
-            {/* Add Dataset Drawer */}
-            {showAddDataset && (
-              <div className="border border-dashed border-black p-2.5 my-1 flex flex-col gap-2">
-                <div className="font-bold text-[10px] uppercase">OPTION A: IMPORT FROM HUGGING FACE HUB</div>
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    className="flex-1 border border-black p-1.5 bg-white text-[11px] outline-none"
-                    placeholder="e.g. scikit-learn/adult-census-income"
-                    value={hfInput}
-                    onChange={(e) => setHfInput(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="border border-black px-3 font-bold uppercase hover:bg-black hover:text-white"
-                    onClick={handleUploadHf}
-                  >
-                    FETCH & PROCEED
-                  </button>
-                </div>
-
-                <div className="font-bold text-[10px] uppercase mt-1">OPTION B: UPLOAD LOCAL CSV</div>
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept=".csv"
-                  className="w-full border border-black p-1 bg-white text-[11px]"
-                />
-                <button
-                  type="button"
-                  className="w-full border border-black p-1.5 font-bold uppercase hover:bg-black hover:text-white"
-                  onClick={handleUploadCsv}
-                >
-                  LOAD CSV & PROCEED
-                </button>
-
-                {uploadStatus && (
-                  <div className="font-bold text-[11px] mt-1 border-t border-black pt-1">{uploadStatus}</div>
-                )}
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block font-bold uppercase text-[10px] mb-1">Model Architecture</label>
-                <select
-                  className="w-full border border-black p-1.5 bg-white text-[12px] outline-none"
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                >
-                  <option value="graph_memory_adaptive">Graph Memory Concept Topology Adaptive Model (0ms Recall)</option>
-                  <option value="proposed">Proposed Selective Adapt (RF + SVM + Online Scaler)</option>
-                  <option value="drift_moe">DriftMoE (2026 Mixture of Experts + RTX 5070 CUDA)</option>
-                  <option value="boosted_forest">Boosted ARF-DWM Forest (Shadow Trees)</option>
-                  <option value="dual_memory">Self-Healing Dual-Memory Meta-Ensemble</option>
-                  <option value="xgboost_cuda">Hardware-Accelerated Adaptive XGBoost (RTX 5070 CUDA)</option>
-                  <option value="adaptive_svm">Adaptive Online SVM (Incremental Margin)</option>
-                  <option value="full_retrain">Full Retraining (Baseline)</option>
-                  <option value="selective">Selective Adaptive Ensemble (Standard)</option>
-                  <option value="static">Static Streaming Model (No Adapt)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block font-bold uppercase text-[10px] mb-1">Drift Detector</label>
-                <select
-                  className="w-full border border-black p-1.5 bg-white text-[12px] outline-none"
-                  value={selectedDetector}
-                  onChange={(e) => setSelectedDetector(e.target.value)}
-                >
-                  <option value="adwin">ADWIN (Adaptive Sliding Window)</option>
-                  <option value="ddm">DDM (Drift Detection Method)</option>
-                  <option value="eddm">EDDM (Early Drift Detection Method)</option>
-                  <option value="page_hinkley">Page-Hinkley Cumulative Sum</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block font-bold uppercase text-[10px] mb-1">Warmup Training Samples</label>
-                <input
-                  type="number"
-                  className="w-full border border-black p-1.5 bg-white text-[12px] outline-none"
-                  value={warmup}
-                  onChange={(e) => setWarmup(parseInt(e.target.value) || 200)}
-                />
-              </div>
-              <div>
-                <label className="block font-bold uppercase text-[10px] mb-1">Rolling Metrics Window</label>
-                <input
-                  type="number"
-                  className="w-full border border-black p-1.5 bg-white text-[12px] outline-none"
-                  value={windowSize}
-                  onChange={(e) => setWindowSize(parseInt(e.target.value) || 100)}
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-2 mt-2">
-              <button
-                type="button"
-                className="flex-1 bg-black text-white p-2 font-bold uppercase hover:bg-neutral-800"
-                onClick={handleStart}
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+                Online Drift Detector
+              </label>
+              <select
+                className="w-full bg-[#1e293b] border border-[#334155] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                value={selectedDetector}
+                onChange={(e) => setSelectedDetector(e.target.value)}
               >
-                START STREAMING EXECUTION
-              </button>
-              <button
-                type="button"
-                className="w-28 border border-black p-2 font-bold uppercase hover:bg-black hover:text-white"
-                onClick={handleStop}
-              >
-                HALT STREAM
-              </button>
-              <button
-                type="button"
-                className="w-28 border border-black p-2 font-bold uppercase hover:bg-black hover:text-white"
-                onClick={() => triggerExport("json")}
-              >
-                EXPORT (JSON)
-              </button>
+                <option value="adwin">ADWIN (Adaptive Sliding Window)</option>
+                <option value="ddm">DDM (Drift Detection Method)</option>
+                <option value="eddm">EDDM (Early Drift Detection Method)</option>
+                <option value="page_hinkley">Page-Hinkley Cumulative Sum</option>
+              </select>
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-3 border-t border-[#1e293b]">
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">
+                Warmup Samples (Bootstrap Window)
+              </label>
+              <input
+                type="number"
+                className="w-full bg-[#1e293b] border border-[#334155] rounded-lg px-3 py-1.5 text-xs text-white"
+                value={warmup}
+                onChange={(e) => setWarmup(parseInt(e.target.value) || 20)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">
+                Rolling Evaluation Window (Samples)
+              </label>
+              <input
+                type="number"
+                className="w-full bg-[#1e293b] border border-[#334155] rounded-lg px-3 py-1.5 text-xs text-white"
+                value={windowSize}
+                onChange={(e) => setWindowSize(parseInt(e.target.value) || 50)}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-[#1e293b]">
+            <button
+              type="button"
+              onClick={handleStart}
+              className="px-5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs uppercase tracking-wide cursor-pointer"
+            >
+              Apply & Run Pipeline
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* 4. Core Performance Metrics Grid */}
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+        <div className="bg-[#0f172a] border border-[#1e293b] rounded-xl p-4 shadow">
+          <div className="text-xs uppercase font-semibold text-slate-400 tracking-wider">
+            PREQUENTIAL ACCURACY
+          </div>
+          <div className="text-2xl md:text-3xl font-extrabold text-white mt-1 font-mono">
+            {(telemetry?.accuracy || 0).toFixed(2)}%
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5">
+            <span className="text-emerald-400">●</span> Cumulative Stream Scoring
           </div>
         </div>
 
-        {/* Live Metrics Panel */}
-        <div className="border border-black p-2.5 bg-white flex flex-col justify-between">
+        <div className="bg-[#0f172a] border border-[#1e293b] rounded-xl p-4 shadow">
+          <div className="text-xs uppercase font-semibold text-slate-400 tracking-wider">
+            WINDOWED ACCURACY
+          </div>
+          <div className="text-2xl md:text-3xl font-extrabold text-cyan-400 mt-1 font-mono">
+            {(telemetry?.window_accuracy || 0).toFixed(2)}%
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1">
+            Last {windowSize} Rolling Samples
+          </div>
+        </div>
+
+        <div className="bg-[#0f172a] border border-[#1e293b] rounded-xl p-4 shadow">
+          <div className="text-xs uppercase font-semibold text-slate-400 tracking-wider">
+            CONCEPT DRIFT SIGNALS
+          </div>
+          <div className="text-2xl md:text-3xl font-extrabold text-amber-400 mt-1 font-mono">
+            {telemetry?.drift_count || 0}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1">
+            {telemetry?.adaptation_count || 0} Selective Adaptations
+          </div>
+        </div>
+
+        <div className="bg-[#0f172a] border border-[#1e293b] rounded-xl p-4 shadow">
+          <div className="text-xs uppercase font-semibold text-slate-400 tracking-wider">
+            ADAPTATION LATENCY
+          </div>
+          <div className="text-2xl md:text-3xl font-extrabold text-emerald-400 mt-1 font-mono">
+            {(telemetry?.adaptation_time_ms || 0).toFixed(2)} ms
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1">
+            Throughput: {telemetry?.throughput || 0} samples/sec
+          </div>
+        </div>
+      </section>
+
+      {/* 5. Live Stream Accuracy Trajectory Area Chart */}
+      <section className="bg-[#0f172a] border border-[#1e293b] rounded-xl p-4 shadow-lg">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-[#1e293b] pb-2.5 mb-3">
           <div>
-            <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 flex justify-between items-center text-[11px]">
-              <span>STREAMING PERFORMANCE & ADAPTATION METRICS</span>
-              <div className="flex gap-2 items-center">
-                <button
-                  type="button"
-                  onClick={() => triggerExport("summary_csv")}
-                  className="border border-black px-1.5 py-0.5 text-[10px] uppercase font-bold hover:bg-black hover:text-white"
-                >
-                  EXPORT METRICS (CSV)
-                </button>
-                <span className="font-bold">STATUS: {telemetry?.stage || "IDLE"}</span>
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-2 mb-2">
-              <div className="border border-black p-2">
-                <div className="text-[10px] uppercase text-neutral-600 border-b border-neutral-300 pb-0.5 mb-1">
-                  CUMULATIVE ACCURACY
-                </div>
-                <div className="text-[20px] font-bold">{(telemetry?.accuracy || 0).toFixed(2)}%</div>
-                <div className="text-[10px] text-neutral-600">Overall Stream Accuracy</div>
-              </div>
-              <div className="border border-black p-2">
-                <div className="text-[10px] uppercase text-neutral-600 border-b border-neutral-300 pb-0.5 mb-1">
-                  WINDOWED ACCURACY
-                </div>
-                <div className="text-[20px] font-bold">{(telemetry?.window_accuracy || 0).toFixed(2)}%</div>
-                <div className="text-[10px] text-neutral-600">Last Rolling Window</div>
-              </div>
-              <div className="border border-black p-2">
-                <div className="text-[10px] uppercase text-neutral-600 border-b border-neutral-300 pb-0.5 mb-1">
-                  F1-SCORE
-                </div>
-                <div className="text-[20px] font-bold">{(telemetry?.f1_score || 0).toFixed(2)}%</div>
-                <div className="text-[10px] text-neutral-600">Precision / Recall Balance</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-4 gap-2">
-              <div className="border border-black p-2">
-                <div className="text-[10px] uppercase text-neutral-600 border-b border-neutral-300 pb-0.5 mb-1">
-                  PROCESSED SAMPLES
-                </div>
-                <div className="text-[14px] font-bold">
-                  {(telemetry?.current_sample || 0).toLocaleString()} / {(telemetry?.total_samples || 0).toLocaleString()}
-                </div>
-                <div className="text-[10px] text-neutral-600">
-                  {telemetry?.total_samples
-                    ? `${((telemetry.current_sample / telemetry.total_samples) * 100).toFixed(1)}% Done`
-                    : "0.0%"}
-                </div>
-              </div>
-              <div className="border border-black p-2">
-                <div className="text-[10px] uppercase text-neutral-600 border-b border-neutral-300 pb-0.5 mb-1">
-                  DRIFT SIGNALS
-                </div>
-                <div className="text-[16px] font-bold">{telemetry?.drift_count || 0}</div>
-                <div className="text-[10px] text-neutral-600">Detected Shifts</div>
-              </div>
-              <div className="border border-black p-2">
-                <div className="text-[10px] uppercase text-neutral-600 border-b border-neutral-300 pb-0.5 mb-1">
-                  ADAPTATIONS
-                </div>
-                <div className="text-[16px] font-bold">{telemetry?.adaptation_count || 0}</div>
-                <div className="text-[10px] text-neutral-600">{telemetry?.components_modified || 0} Mod. Trees</div>
-              </div>
-              <div className="border border-black p-2">
-                <div className="text-[10px] uppercase text-neutral-600 border-b border-neutral-300 pb-0.5 mb-1">
-                  THROUGHPUT
-                </div>
-                <div className="text-[16px] font-bold">{telemetry?.throughput || 0} smp/s</div>
-                <div className="text-[10px] text-neutral-600">
-                  Latency: {(telemetry?.adaptation_time_ms || 0).toFixed(1)}ms
-                </div>
-              </div>
-            </div>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+              REAL-TIME ACCURACY & DRIFT TRAJECTORY DYNAMICS
+            </h2>
+            <p className="text-[11px] text-slate-400">
+              Sample-by-sample prequential validation trajectory with automated drift marker events
+            </p>
           </div>
-        </div>
-      </div>
-
-      {/* Output & Telemetry Export Center */}
-      <div className="border border-black p-2.5 bg-white">
-        <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 flex justify-between items-center text-[11px]">
-          <span>OUTPUT & TELEMETRY EXPORT CENTER</span>
-          {exportNotice ? (
-            <span className="bg-black text-white px-2 py-0.5 text-[10px] font-bold tracking-wider">
-              {exportNotice}
+          <div className="flex items-center gap-4 text-xs">
+            <span className="flex items-center gap-1.5 text-slate-300">
+              <span className="w-3 h-0.5 bg-cyan-400 rounded-full" /> Cumulative Acc
             </span>
-          ) : (
-            <span className="text-[10px] text-neutral-500">FORMATS: CSV / JSON / TXT</span>
-          )}
-        </div>
-        <div className="grid grid-cols-5 gap-2">
-          <button
-            type="button"
-            onClick={() => triggerExport("summary_csv")}
-            className="border border-black p-2 text-center hover:bg-black hover:text-white uppercase font-bold text-[11px] flex flex-col items-center justify-center gap-0.5"
-          >
-            <span>EXPORT SUMMARY (CSV)</span>
-            <span className="text-[9px] font-normal text-neutral-500 hover:text-neutral-300">Accuracy, F1, Latency & Stats</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => triggerExport("trajectory_csv")}
-            className="border border-black p-2 text-center hover:bg-black hover:text-white uppercase font-bold text-[11px] flex flex-col items-center justify-center gap-0.5"
-          >
-            <span>EXPORT TRAJECTORY (CSV)</span>
-            <span className="text-[9px] font-normal text-neutral-500 hover:text-neutral-300">Sample-by-Sample Time Series</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => triggerExport("modifications_csv")}
-            className="border border-black p-2 text-center hover:bg-black hover:text-white uppercase font-bold text-[11px] flex flex-col items-center justify-center gap-0.5"
-          >
-            <span>EXPORT AUDIT LOG (CSV)</span>
-            <span className="text-[9px] font-normal text-neutral-500 hover:text-neutral-300">Component Adaptation Events</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => triggerExport("logs")}
-            className="border border-black p-2 text-center hover:bg-black hover:text-white uppercase font-bold text-[11px] flex flex-col items-center justify-center gap-0.5"
-          >
-            <span>EXPORT LOGS (TXT)</span>
-            <span className="text-[9px] font-normal text-neutral-500 hover:text-neutral-300">Raw Console Execution Trace</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => triggerExport("json")}
-            className="border border-black p-2 text-center hover:bg-black hover:text-white uppercase font-bold text-[11px] flex flex-col items-center justify-center gap-0.5"
-          >
-            <span>EXPORT FULL RUN (JSON)</span>
-            <span className="text-[9px] font-normal text-neutral-500 hover:text-neutral-300">Complete Telemetry & Hardware</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Live Pure SVG Stream Trajectory Chart */}
-      <div className="border border-black p-2.5 bg-white">
-        <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 flex justify-between items-center text-[11px]">
-          <span>LIVE STREAM ACCURACY & DRIFT TRAJECTORY (SVG)</span>
-          <div className="flex gap-2 items-center">
-            <span className="text-[10px]">— SOLID: CUMULATIVE | ··· DOTTED: WINDOWED | ╎ DASH: DRIFT SIGNAL</span>
-            <button
-              type="button"
-              className="border border-black px-2 py-0.5 uppercase text-[10px] font-bold hover:bg-black hover:text-white"
-              onClick={() => triggerExport("trajectory_csv")}
-            >
-              EXPORT TRAJECTORY (CSV)
-            </button>
-            <button
-              type="button"
-              className="border border-black px-2 py-0.5 uppercase text-[10px] font-bold hover:bg-black hover:text-white"
-              onClick={() => triggerExport("json")}
-            >
-              EXPORT (JSON)
-            </button>
+            <span className="flex items-center gap-1.5 text-slate-400">
+              <span className="w-3 h-0.5 bg-slate-400 stroke-dasharray rounded-full" /> Windowed Acc
+            </span>
+            <span className="flex items-center gap-1.5 text-rose-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" /> Drift Flag
+            </span>
           </div>
         </div>
-        <div className="w-full h-40 border border-black bg-white relative">
-          <svg width="100%" height="160" viewBox={`0 0 ${svgWidth} ${svgHeight}`} preserveAspectRatio="none">
-            {/* Grid Ticks */}
-            <line x1={padX} y1={20} x2={svgWidth} y2={20} stroke="#eeeeee" strokeWidth="1" />
-            <text x="5" y="24" fontSize="9" fill="#888888">
+
+        <div className="w-full h-44 relative bg-[#090d16] rounded-lg overflow-hidden border border-[#1e293b]">
+          <svg width="100%" height="176" viewBox={`0 0 ${svgWidth} ${svgHeight}`} preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.25" />
+                <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.0" />
+              </linearGradient>
+            </defs>
+
+            {/* Grid Horizontal Ticks */}
+            <line x1={padX} y1={20} x2={svgWidth} y2={20} stroke="#1e293b" strokeWidth="1" />
+            <text x="8" y="24" fontSize="9" fill="#64748b" fontFamily="monospace">
               100%
             </text>
-            <line x1={padX} y1={55} x2={svgWidth} y2={55} stroke="#eeeeee" strokeWidth="1" />
-            <text x="5" y="59" fontSize="9" fill="#888888">
+            <line x1={padX} y1={55} x2={svgWidth} y2={55} stroke="#1e293b" strokeWidth="1" />
+            <text x="8" y="59" fontSize="9" fill="#64748b" fontFamily="monospace">
               75%
             </text>
-            <line x1={padX} y1={90} x2={svgWidth} y2={90} stroke="#eeeeee" strokeWidth="1" />
-            <text x="5" y="94" fontSize="9" fill="#888888">
+            <line x1={padX} y1={90} x2={svgWidth} y2={90} stroke="#1e293b" strokeWidth="1" />
+            <text x="8" y="94" fontSize="9" fill="#64748b" fontFamily="monospace">
               50%
             </text>
-            <line x1={padX} y1={125} x2={svgWidth} y2={125} stroke="#eeeeee" strokeWidth="1" />
-            <text x="5" y="129" fontSize="9" fill="#888888">
+            <line x1={padX} y1={125} x2={svgWidth} y2={125} stroke="#1e293b" strokeWidth="1" />
+            <text x="8" y="129" fontSize="9" fill="#64748b" fontFamily="monospace">
               25%
             </text>
-            <line x1={padX} y1={145} x2={svgWidth} y2={145} stroke="#000000" strokeWidth="1" />
+            <line x1={padX} y1={145} x2={svgWidth} y2={145} stroke="#334155" strokeWidth="1" />
 
-            {/* Drift Vertical Markers */}
+            {/* Drift Vertical Event Lines */}
             {driftLines.map((dx, i) => (
-              <line
-                key={i}
-                x1={dx}
-                y1={padTop}
-                x2={dx}
-                y2={svgHeight - padBottom}
-                stroke="#000000"
-                strokeWidth="1"
-                strokeDasharray="2,2"
-              />
+              <g key={i}>
+                <line
+                  x1={dx}
+                  y1={padTop}
+                  x2={dx}
+                  y2={svgHeight - padBottom}
+                  stroke="#f43f5e"
+                  strokeWidth="1.5"
+                  strokeDasharray="3,3"
+                />
+                <circle cx={dx} cy={svgHeight - padBottom} r="3" fill="#f43f5e" />
+              </g>
             ))}
+
+            {/* Smooth Area Gradient */}
+            {dArea && <path d={dArea} fill="url(#areaGradient)" />}
+
             {/* Cumulative Accuracy Path */}
-            {dCum && <path d={dCum} fill="none" stroke="#000000" strokeWidth="2" />}
+            {dCum && <path d={dCum} fill="none" stroke="#22d3ee" strokeWidth="2.5" strokeLinecap="round" />}
+
             {/* Windowed Accuracy Path */}
-            {dWin && <path d={dWin} fill="none" stroke="#000000" strokeWidth="1" strokeDasharray="3,3" />}
+            {dWin && (
+              <path
+                d={dWin}
+                fill="none"
+                stroke="#cbd5e1"
+                strokeWidth="1.5"
+                strokeDasharray="4,4"
+              />
+            )}
           </svg>
         </div>
-      </div>
+      </section>
 
-      {/* Concept Topology Graph Memory Visualizer */}
-      <div className="border border-black p-2.5 bg-white">
-        <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 flex justify-between items-center text-[11px]">
-          <div className="flex items-center gap-2">
-            <span>CONCEPT TOPOLOGY GRAPH MEMORY (RECURRING REGIME ADAPTATION)</span>
-            <span className="bg-black text-white px-1.5 py-0.2 text-[9px] font-bold">
-              LIFELONG CONTINUAL LEARNING
-            </span>
+      {/* 6. Concept Topology Graph Memory Visualizer (Lifelong Learning) */}
+      <section className="bg-[#0f172a] border border-[#1e293b] rounded-xl p-5 shadow-lg">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-[#1e293b] pb-3 mb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                CONCEPT TOPOLOGY GRAPH MEMORY
+              </h2>
+              <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                LIFELONG CONTINUAL LEARNING
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Topological regime network resolving recurring concepts with instant 0ms recall
+            </p>
           </div>
-          <div className="flex gap-2 items-center text-[10px]">
-            <span className="font-bold">LAST ACTION:</span>
-            <span className="bg-neutral-100 border border-black px-1.5 py-0.5 font-bold uppercase">
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">LAST ACTION:</span>
+            <span className="px-2.5 py-1 rounded bg-[#1e293b] border border-[#334155] text-xs font-bold text-white font-mono">
               {telemetry?.graph_memory?.last_action || "INITIALIZED"}
             </span>
           </div>
         </div>
 
-        {/* Graph Memory Telemetry Stats */}
-        <div className="grid grid-cols-6 gap-2 mb-3">
-          <div className="border border-black p-1.5">
-            <div className="text-[9px] uppercase text-neutral-600">DISCOVERED REGIMES</div>
-            <div className="text-[16px] font-bold">{telemetry?.graph_memory?.total_nodes || 1} Nodes</div>
-            <div className="text-[9px] text-neutral-500">Topological States</div>
+        {/* Graph Memory Telemetry Stats Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+          <div className="bg-[#1e293b]/50 border border-[#334155] rounded-lg p-2.5">
+            <div className="text-[10px] uppercase font-semibold text-slate-400">DISCOVERED REGIMES</div>
+            <div className="text-lg font-bold text-white mt-0.5">
+              {telemetry?.graph_memory?.total_nodes || 1} Nodes
+            </div>
+            <div className="text-[10px] text-slate-500">Topological States</div>
           </div>
-          <div className="border border-black p-1.5 bg-neutral-50">
-            <div className="text-[9px] uppercase text-neutral-600 font-bold">INSTANT RECALLS</div>
-            <div className="text-[16px] font-bold text-emerald-600">
+
+          <div className="bg-emerald-500/5 border border-emerald-500/30 rounded-lg p-2.5">
+            <div className="text-[10px] uppercase font-semibold text-emerald-400">INSTANT RECALLS</div>
+            <div className="text-lg font-bold text-emerald-300 mt-0.5 font-mono">
               {telemetry?.graph_memory?.recall_count || 0}
             </div>
-            <div className="text-[9px] text-emerald-700 font-bold">0ms Retraining Time</div>
+            <div className="text-[10px] text-emerald-500 font-bold">0ms Retraining Time</div>
           </div>
-          <div className="border border-black p-1.5">
-            <div className="text-[9px] uppercase text-neutral-600">NOVEL REGIME SPAWNS</div>
-            <div className="text-[16px] font-bold">{telemetry?.graph_memory?.spawn_count || 0}</div>
-            <div className="text-[9px] text-neutral-500">Unseen Distributions</div>
+
+          <div className="bg-[#1e293b]/50 border border-[#334155] rounded-lg p-2.5">
+            <div className="text-[10px] uppercase font-semibold text-slate-400">NOVEL REGIME SPAWNS</div>
+            <div className="text-lg font-bold text-white mt-0.5">
+              {telemetry?.graph_memory?.spawn_count || 0}
+            </div>
+            <div className="text-[10px] text-slate-500">Unseen Distributions</div>
           </div>
-          <div className="border border-black p-1.5">
-            <div className="text-[9px] uppercase text-neutral-600">ACTIVE REGIME</div>
-            <div className="text-[14px] font-bold">
+
+          <div className="bg-[#1e293b]/50 border border-[#334155] rounded-lg p-2.5">
+            <div className="text-[10px] uppercase font-semibold text-slate-400">ACTIVE REGIME</div>
+            <div className="text-sm font-bold text-cyan-300 mt-1 truncate">
               Regime #{telemetry?.graph_memory?.active_node_id ?? 0}
             </div>
-            <div className="text-[9px] text-neutral-500">Active Expert Head</div>
+            <div className="text-[10px] text-slate-500">Active Expert Head</div>
           </div>
-          <div className="border border-black p-1.5">
-            <div className="text-[9px] uppercase text-neutral-600">CENTROID DISTANCE</div>
-            <div className="text-[14px] font-bold">
+
+          <div className="bg-[#1e293b]/50 border border-[#334155] rounded-lg p-2.5">
+            <div className="text-[10px] uppercase font-semibold text-slate-400">CENTROID DISTANCE</div>
+            <div className="text-sm font-bold text-white mt-1 font-mono">
               {telemetry?.graph_memory?.last_distance || 0.0}
             </div>
-            <div className="text-[9px] text-neutral-500">
+            <div className="text-[10px] text-slate-500">
               Threshold: {telemetry?.graph_memory?.similarity_threshold || 1.8}
             </div>
           </div>
-          <div className="border border-black p-1.5 bg-neutral-50">
-            <div className="text-[9px] uppercase text-neutral-600 font-bold">ANTICIPATED NEXT</div>
-            <div className="text-[14px] font-bold text-neutral-800">
+
+          <div className="bg-[#1e293b]/50 border border-[#334155] rounded-lg p-2.5">
+            <div className="text-[10px] uppercase font-semibold text-slate-400">ANTICIPATED NEXT</div>
+            <div className="text-sm font-bold text-slate-200 mt-1 truncate">
               Regime #{telemetry?.graph_memory?.next_predicted_regime ?? 0}
             </div>
-            <div className="text-[9px] text-neutral-600 font-bold">
+            <div className="text-[10px] text-indigo-400 font-semibold font-mono">
               {telemetry?.graph_memory?.next_predicted_probability || 0}% Markov Prob
             </div>
           </div>
         </div>
 
-        {/* Dynamic Concept Node Cards */}
-        <div className="border border-black p-2 bg-neutral-50 mb-2">
-          <div className="text-[10px] font-bold uppercase mb-1.5 flex justify-between">
-            <span>TOPOLOGICAL CONCEPT NODES & EXPERT ACCURACY</span>
-            <span className="text-neutral-500 font-normal">● GLOWING = ACTIVE REGIME EXPERT</span>
+        {/* Dynamic Concept Node Cards Network */}
+        <div className="border border-[#1e293b] rounded-xl p-3 bg-[#090d16] mb-3">
+          <div className="text-xs font-semibold text-slate-400 mb-2 flex justify-between items-center">
+            <span>DISCOVERED REGIME EXPERTS</span>
+            <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Glowing Ring = Active Regime
+            </span>
           </div>
-          <div className="grid grid-cols-4 gap-2">
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
             {telemetry?.graph_memory?.nodes && telemetry.graph_memory.nodes.length > 0 ? (
               telemetry.graph_memory.nodes.map((node) => (
                 <div
                   key={node.id}
-                  className={`border p-2 text-[11px] ${
+                  className={`rounded-lg p-3 transition border ${
                     node.is_active
-                      ? "border-black bg-white shadow-sm ring-2 ring-black"
-                      : "border-neutral-300 bg-white"
+                      ? "bg-[#1e293b] border-emerald-500 ring-2 ring-emerald-500/30 glow-active"
+                      : "bg-[#0f172a] border-[#1e293b] hover:border-[#334155]"
                   }`}
                 >
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="font-bold text-[10px] uppercase truncate">{node.label}</span>
+                  <div className="flex justify-between items-start mb-1.5">
+                    <span className="text-xs font-bold text-white truncate">{node.label}</span>
                     {node.is_active && (
-                      <span className="bg-black text-white px-1 text-[8px] font-bold uppercase">
+                      <span className="bg-emerald-500 text-slate-950 font-extrabold text-[8px] px-1.5 py-0.5 rounded uppercase">
                         ACTIVE
                       </span>
                     )}
                   </div>
-                  <div className="flex justify-between text-[10px] text-neutral-600 border-t border-neutral-200 pt-1">
-                    <span>SAMPLES: {node.samples.toLocaleString()}</span>
-                    <span className="font-bold text-black">{node.accuracy}% ACC</span>
+                  <div className="flex justify-between items-center text-[11px] text-slate-400 border-t border-[#1e293b] pt-1.5 mt-1 font-mono">
+                    <span>{node.samples.toLocaleString()} Samples</span>
+                    <span className="font-bold text-emerald-400">{node.accuracy}% Acc</span>
                   </div>
                 </div>
               ))
             ) : (
-              <div className="col-span-4 text-center py-2 text-neutral-500 text-[11px]">
-                Concept graph initializes as stream flows...
+              <div className="col-span-4 text-center py-4 text-slate-500 text-xs">
+                Concept topology graph populates automatically as data streams in...
               </div>
             )}
           </div>
         </div>
 
-        {/* Transition Edges Matrix */}
+        {/* Transition Markov Edges Bar */}
         {telemetry?.graph_memory?.edges && telemetry.graph_memory.edges.length > 0 && (
-          <div className="border border-neutral-300 p-1.5 bg-white text-[10px] flex items-center gap-2 overflow-x-auto">
-            <span className="font-bold uppercase whitespace-nowrap">MARKOV TRANSITIONS:</span>
+          <div className="flex items-center gap-2 overflow-x-auto py-1 text-xs">
+            <span className="text-[10px] uppercase font-bold text-slate-400 whitespace-nowrap">
+              MARKOV TRANSITIONS:
+            </span>
             <div className="flex gap-2">
               {telemetry.graph_memory.edges.slice(-6).map((edge, idx) => (
                 <span
                   key={idx}
-                  className={`border px-1.5 py-0.5 whitespace-nowrap ${
-                    edge.is_active_transition ? "border-black font-bold bg-neutral-100" : "border-neutral-200 text-neutral-600"
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-mono whitespace-nowrap border ${
+                    edge.is_active_transition
+                      ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/40 font-bold"
+                      : "bg-[#1e293b] text-slate-400 border-[#334155]"
                   }`}
                 >
                   Regime #{edge.from} → #{edge.to} ({(edge.probability * 100).toFixed(0)}%)
@@ -1004,36 +961,54 @@ export default function ControlPanel() {
             </div>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Downstream Real-World Execution & Dynamic Risk Cockpit */}
-      <div className="border border-black p-2.5 bg-white">
-        <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 flex justify-between items-center text-[11px]">
-          <div className="flex items-center gap-2">
-            <span>DOWNSTREAM EXECUTION & DYNAMIC RISK CONTROL COCKPIT</span>
-            <span className="bg-neutral-100 border border-black px-1.5 py-0.2 text-[9px] font-bold uppercase">
-              CAPITAL PRESERVATION & PNL
-            </span>
+      {/* 7. Downstream Execution & Dynamic Risk Management Cockpit */}
+      <section className="bg-[#0f172a] border border-[#1e293b] rounded-xl p-5 shadow-lg">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-[#1e293b] pb-3 mb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                DOWNSTREAM EXECUTION & DYNAMIC RISK MANAGEMENT COCKPIT
+              </h2>
+              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                3-WAY CAPITAL BENCHMARK
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Simulated real-time portfolio execution comparing Adaptive vs Static vs Full Retrain
+            </p>
           </div>
-          <span className="text-[10px] font-mono text-neutral-600">INITIAL CAPITAL: $10,000.00</span>
+          <span className="text-xs font-mono text-slate-400">
+            Initial Capital: <strong className="text-white">$10,000.00</strong>
+          </span>
         </div>
 
-        {/* 3-Way Comparative Financial Scoreboard */}
-        <div className="grid grid-cols-3 gap-3 mb-3">
-          {/* 1. Graph Memory Adaptive Strategy */}
-          <div className="border-2 border-black p-2.5 bg-neutral-50 flex flex-col justify-between">
+        {/* 3-Way Comparative Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          {/* Card 1: Graph Memory Adaptive Model (Our Framework) */}
+          <div className="bg-gradient-to-b from-[#132238] to-[#0f172a] border-2 border-emerald-500/60 rounded-xl p-4 shadow-md flex flex-col justify-between">
             <div>
-              <div className="flex justify-between items-center border-b border-black pb-1 mb-1.5">
-                <span className="font-bold text-[11px] uppercase">1. GRAPH ADAPTIVE MODEL</span>
-                <span className="bg-black text-white text-[8px] font-bold px-1 uppercase">OUR FRAMEWORK</span>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-bold text-emerald-400 uppercase tracking-wide">
+                  1. GRAPH ADAPTIVE MODEL
+                </span>
+                <span className="bg-emerald-500 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded uppercase">
+                  OUR MODEL
+                </span>
               </div>
-              <div className="flex items-baseline justify-between mb-1">
-                <span className="text-[20px] font-bold">
-                  ${(telemetry?.downstream?.adaptive?.capital || 10000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <div className="flex items-baseline justify-between mb-2">
+                <span className="text-2xl font-extrabold text-white font-mono">
+                  ${(telemetry?.downstream?.adaptive?.capital || 10000).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
                 <span
-                  className={`text-[12px] font-bold ${
-                    (telemetry?.downstream?.adaptive?.pnl || 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+                  className={`text-xs font-bold font-mono px-2 py-0.5 rounded ${
+                    (telemetry?.downstream?.adaptive?.pnl || 0) >= 0
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : "bg-rose-500/15 text-rose-400"
                   }`}
                 >
                   {(telemetry?.downstream?.adaptive?.pnl || 0) >= 0 ? "+" : ""}
@@ -1041,43 +1016,58 @@ export default function ControlPanel() {
                   {(telemetry?.downstream?.adaptive?.pnl_pct || 0).toFixed(2)}%)
                 </span>
               </div>
-              <div className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600 border-t border-neutral-300 pt-1.5">
+
+              <div className="grid grid-cols-3 gap-2 text-xs border-t border-[#1e293b] pt-2 text-slate-400 font-mono">
                 <div>
-                  <span className="block text-[8px] uppercase">WIN RATE</span>
-                  <span className="font-bold text-black">{telemetry?.downstream?.adaptive?.win_rate || 0}%</span>
+                  <span className="text-[10px] block text-slate-500 uppercase">WIN RATE</span>
+                  <span className="font-bold text-white">
+                    {telemetry?.downstream?.adaptive?.win_rate || 0}%
+                  </span>
                 </div>
                 <div>
-                  <span className="block text-[8px] uppercase">POSITION</span>
-                  <span className="font-bold text-black">
+                  <span className="text-[10px] block text-slate-500 uppercase">POSITION</span>
+                  <span className="font-bold text-white">
                     {(telemetry?.downstream?.adaptive?.position || 0) > 0 ? "+" : ""}
                     {telemetry?.downstream?.adaptive?.position || 0}
                   </span>
                 </div>
                 <div>
-                  <span className="block text-[8px] uppercase">MAX DRAWDOWN</span>
-                  <span className="font-bold text-black">{telemetry?.downstream?.adaptive?.max_drawdown || 0}%</span>
+                  <span className="text-[10px] block text-slate-500 uppercase">MAX DD</span>
+                  <span className="font-bold text-white">
+                    {telemetry?.downstream?.adaptive?.max_drawdown || 0}%
+                  </span>
                 </div>
               </div>
             </div>
-            <div className="mt-2 pt-1 border-t border-neutral-300 text-[9px] font-bold uppercase text-neutral-700">
-              RISK PROTOCOL: {telemetry?.downstream?.adaptive?.risk_status || "NORMAL (100% Budget)"}
+
+            <div className="mt-3 pt-2 border-t border-[#1e293b] text-[10px] font-bold text-emerald-400 uppercase tracking-wide">
+              PROTOCOL: {telemetry?.downstream?.adaptive?.risk_status || "NORMAL (100% Budget)"}
             </div>
           </div>
 
-          {/* 2. Static Baseline Model */}
-          <div className="border border-black p-2.5 bg-white flex flex-col justify-between">
+          {/* Card 2: Static Baseline Model */}
+          <div className="bg-[#0f172a] border border-[#334155] rounded-xl p-4 flex flex-col justify-between">
             <div>
-              <div className="flex justify-between items-center border-b border-black pb-1 mb-1.5">
-                <span className="font-bold text-[11px] uppercase">2. STATIC BASELINE (NO ADAPT)</span>
-                <span className="border border-black text-[8px] font-bold px-1 uppercase text-neutral-600">FROZEN WEIGHTS</span>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">
+                  2. STATIC MODEL (NO ADAPT)
+                </span>
+                <span className="bg-slate-800 text-slate-400 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
+                  FROZEN
+                </span>
               </div>
-              <div className="flex items-baseline justify-between mb-1">
-                <span className="text-[20px] font-bold">
-                  ${(telemetry?.downstream?.static?.capital || 10000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <div className="flex items-baseline justify-between mb-2">
+                <span className="text-2xl font-extrabold text-white font-mono">
+                  ${(telemetry?.downstream?.static?.capital || 10000).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
                 <span
-                  className={`text-[12px] font-bold ${
-                    (telemetry?.downstream?.static?.pnl || 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+                  className={`text-xs font-bold font-mono px-2 py-0.5 rounded ${
+                    (telemetry?.downstream?.static?.pnl || 0) >= 0
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : "bg-rose-500/15 text-rose-400"
                   }`}
                 >
                   {(telemetry?.downstream?.static?.pnl || 0) >= 0 ? "+" : ""}
@@ -1085,40 +1075,57 @@ export default function ControlPanel() {
                   {(telemetry?.downstream?.static?.pnl_pct || 0).toFixed(2)}%)
                 </span>
               </div>
-              <div className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600 border-t border-neutral-300 pt-1.5">
+
+              <div className="grid grid-cols-3 gap-2 text-xs border-t border-[#1e293b] pt-2 text-slate-400 font-mono">
                 <div>
-                  <span className="block text-[8px] uppercase">WIN RATE</span>
-                  <span className="font-bold text-black">{telemetry?.downstream?.static?.win_rate || 0}%</span>
+                  <span className="text-[10px] block text-slate-500 uppercase">WIN RATE</span>
+                  <span className="font-bold text-white">
+                    {telemetry?.downstream?.static?.win_rate || 0}%
+                  </span>
                 </div>
                 <div>
-                  <span className="block text-[8px] uppercase">POSITION</span>
-                  <span className="font-bold text-black">{telemetry?.downstream?.static?.position || 0}</span>
+                  <span className="text-[10px] block text-slate-500 uppercase">POSITION</span>
+                  <span className="font-bold text-white">
+                    {telemetry?.downstream?.static?.position || 0}
+                  </span>
                 </div>
                 <div>
-                  <span className="block text-[8px] uppercase">MAX DRAWDOWN</span>
-                  <span className="font-bold text-black">{telemetry?.downstream?.static?.max_drawdown || 0}%</span>
+                  <span className="text-[10px] block text-slate-500 uppercase">MAX DD</span>
+                  <span className="font-bold text-white">
+                    {telemetry?.downstream?.static?.max_drawdown || 0}%
+                  </span>
                 </div>
               </div>
             </div>
-            <div className="mt-2 pt-1 border-t border-neutral-300 text-[9px] uppercase text-rose-600 font-bold">
-              DEFENSIVE ADAPTATION: DISABLED (NO DRIFT RECOVERY)
+
+            <div className="mt-3 pt-2 border-t border-[#1e293b] text-[10px] font-bold text-rose-400 uppercase tracking-wide">
+              DEFECT: DRAWS DOWN CATASTROPHICALLY ON REGIME SHIFTS
             </div>
           </div>
 
-          {/* 3. Full Retrain Baseline */}
-          <div className="border border-black p-2.5 bg-white flex flex-col justify-between">
+          {/* Card 3: Full Retrain Baseline */}
+          <div className="bg-[#0f172a] border border-[#334155] rounded-xl p-4 flex flex-col justify-between">
             <div>
-              <div className="flex justify-between items-center border-b border-black pb-1 mb-1.5">
-                <span className="font-bold text-[11px] uppercase">3. FULL RETRAINING BASELINE</span>
-                <span className="border border-black text-[8px] font-bold px-1 uppercase text-neutral-600">PERIODIC REFIT</span>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">
+                  3. FULL RETRAINING BASELINE
+                </span>
+                <span className="bg-slate-800 text-slate-400 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
+                  PERIODIC REFIT
+                </span>
               </div>
-              <div className="flex items-baseline justify-between mb-1">
-                <span className="text-[20px] font-bold">
-                  ${(telemetry?.downstream?.retrain?.capital || 10000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <div className="flex items-baseline justify-between mb-2">
+                <span className="text-2xl font-extrabold text-white font-mono">
+                  ${(telemetry?.downstream?.retrain?.capital || 10000).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
                 <span
-                  className={`text-[12px] font-bold ${
-                    (telemetry?.downstream?.retrain?.pnl || 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+                  className={`text-xs font-bold font-mono px-2 py-0.5 rounded ${
+                    (telemetry?.downstream?.retrain?.pnl || 0) >= 0
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : "bg-rose-500/15 text-rose-400"
                   }`}
                 >
                   {(telemetry?.downstream?.retrain?.pnl || 0) >= 0 ? "+" : ""}
@@ -1126,186 +1133,141 @@ export default function ControlPanel() {
                   {(telemetry?.downstream?.retrain?.pnl_pct || 0).toFixed(2)}%)
                 </span>
               </div>
-              <div className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600 border-t border-neutral-300 pt-1.5">
+
+              <div className="grid grid-cols-3 gap-2 text-xs border-t border-[#1e293b] pt-2 text-slate-400 font-mono">
                 <div>
-                  <span className="block text-[8px] uppercase">WIN RATE</span>
-                  <span className="font-bold text-black">{telemetry?.downstream?.retrain?.win_rate || 0}%</span>
+                  <span className="text-[10px] block text-slate-500 uppercase">WIN RATE</span>
+                  <span className="font-bold text-white">
+                    {telemetry?.downstream?.retrain?.win_rate || 0}%
+                  </span>
                 </div>
                 <div>
-                  <span className="block text-[8px] uppercase">POSITION</span>
-                  <span className="font-bold text-black">{telemetry?.downstream?.retrain?.position || 0}</span>
+                  <span className="text-[10px] block text-slate-500 uppercase">POSITION</span>
+                  <span className="font-bold text-white">
+                    {telemetry?.downstream?.retrain?.position || 0}
+                  </span>
                 </div>
                 <div>
-                  <span className="block text-[8px] uppercase">MAX DRAWDOWN</span>
-                  <span className="font-bold text-black">{telemetry?.downstream?.retrain?.max_drawdown || 0}%</span>
+                  <span className="text-[10px] block text-slate-500 uppercase">MAX DD</span>
+                  <span className="font-bold text-white">
+                    {telemetry?.downstream?.retrain?.max_drawdown || 0}%
+                  </span>
                 </div>
               </div>
             </div>
-            <div className="mt-2 pt-1 border-t border-neutral-300 text-[9px] uppercase text-neutral-500 font-bold">
-              PENALTY: HIGH RETRAINING LATENCY SPIKES
+
+            <div className="mt-3 pt-2 border-t border-[#1e293b] text-[10px] font-bold text-amber-400 uppercase tracking-wide">
+              DEFECT: HIGH RE-TRAINING LATENCY FREEZES STREAM INFERENCE
             </div>
           </div>
         </div>
 
-        {/* Live Execution Action Ticker */}
-        <div className="border border-neutral-300 p-2 bg-neutral-50">
-          <div className="text-[10px] font-bold uppercase mb-1 flex justify-between">
-            <span>REAL-TIME EXECUTION & CIRCUIT BREAKER ACTION STREAM</span>
-            <span className="text-neutral-500 font-normal">RECENT DECISION TICKS</span>
+        {/* Real-time Decision & Action Feed */}
+        <div className="border border-[#1e293b] rounded-xl p-3 bg-[#090d16]">
+          <div className="text-xs font-semibold text-slate-400 mb-2 flex justify-between items-center">
+            <span>REAL-TIME EXECUTION DECISION STREAM</span>
+            <span className="text-[10px] text-slate-500">LIVE ACTION DISPATCH</span>
           </div>
-          <div className="max-h-24 overflow-y-auto flex flex-col gap-1 text-[10px] font-mono">
+          <div className="max-h-28 overflow-y-auto flex flex-col gap-1.5 text-xs font-mono">
             {telemetry?.downstream?.recent_actions && telemetry.downstream.recent_actions.length > 0 ? (
               telemetry.downstream.recent_actions.map((act, i) => (
-                <div key={i} className="flex justify-between items-center border-b border-neutral-200 pb-0.5 last:border-b-0">
-                  <div className="flex gap-2 items-center">
-                    <span className="text-neutral-500">[{act.timestamp}]</span>
-                    <span className="font-bold">${act.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    <span className={`font-bold px-1 ${act.signal === "BUY" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>
+                <div
+                  key={i}
+                  className="flex justify-between items-center border-b border-[#1e293b] pb-1 last:border-b-0"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-slate-500 text-[10px]">[{act.timestamp}]</span>
+                    <span className="font-bold text-white">
+                      ${act.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        act.signal === "BUY"
+                          ? "bg-emerald-500/20 text-emerald-400"
+                          : "bg-rose-500/20 text-rose-400"
+                      }`}
+                    >
                       {act.signal} ({act.confidence}%)
                     </span>
-                    <span className="text-neutral-700">{act.risk_action}</span>
+                    <span className="text-slate-300">{act.risk_action}</span>
                   </div>
-                  <div className="flex gap-2">
-                    {act.drift && <span className="bg-rose-600 text-white px-1 text-[8px] font-bold">DRIFT ALERT</span>}
-                    <span className={`font-bold ${act.adaptive_pnl >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                  <div className="flex items-center gap-2">
+                    {act.drift && (
+                      <span className="bg-rose-500 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">
+                        DRIFT ALERT
+                      </span>
+                    )}
+                    <span
+                      className={`font-bold ${
+                        act.adaptive_pnl >= 0 ? "text-emerald-400" : "text-rose-400"
+                      }`}
+                    >
                       PnL: ${act.adaptive_pnl.toFixed(2)}
                     </span>
                   </div>
                 </div>
               ))
             ) : (
-              <div className="text-neutral-400 py-1 text-center font-sans">
-                Awaiting trade ticks and decision dispatch...
+              <div className="text-slate-500 py-2 text-center text-xs">
+                Awaiting trade ticks and live decision events...
               </div>
             )}
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Modifications & Feature Selection Tables */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* Component Modifications Table */}
-        <div className="border border-black p-2.5 bg-white">
-          <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 flex justify-between items-center text-[11px]">
-            <span>MODEL COMPONENT MODIFICATIONS & REPLACEMENTS LOG</span>
-            <button
-              type="button"
-              className="border border-black px-1.5 py-0.5 text-[10px] uppercase font-bold hover:bg-black hover:text-white"
-              onClick={() => triggerExport("modifications_csv")}
+      {/* 8. Collapsible Operational Logs & Telemetry Audit Center */}
+      <section className="bg-[#0f172a] border border-[#1e293b] rounded-xl p-4 shadow">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+              OPERATIONAL LOGS & TELEMETRY CONSOLE
+            </h3>
+            {exportNotice && (
+              <span className="text-emerald-400 text-xs font-semibold animate-pulse">
+                ✓ {exportNotice}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowLogsDrawer(!showLogsDrawer)}
+            className="text-xs font-semibold px-3 py-1 rounded bg-[#1e293b] hover:bg-[#334155] text-slate-300 border border-[#334155] transition"
+          >
+            {showLogsDrawer ? "Hide Console" : "View Console Logs"}
+          </button>
+        </div>
+
+        {showLogsDrawer && (
+          <div className="mt-3 pt-3 border-t border-[#1e293b]">
+            <div
+              ref={logConsoleRef}
+              className="h-44 overflow-y-auto bg-[#090d16] border border-[#1e293b] rounded-lg p-3 font-mono text-[11px] text-slate-300 flex flex-col gap-1"
             >
-              EXPORT AUDIT (CSV)
-            </button>
+              {telemetry?.logs && telemetry.logs.length > 0 ? (
+                telemetry.logs.map((l, idx) => (
+                  <div key={idx} className="flex gap-2">
+                    <span className="text-slate-500">[{l.timestamp}]</span>
+                    <span
+                      className={`font-semibold ${
+                        l.level === "WARNING"
+                          ? "text-amber-400"
+                          : l.level === "ERROR"
+                          ? "text-rose-400"
+                          : "text-slate-300"
+                      }`}
+                    >
+                      [{l.level}] {l.message}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-slate-600">Console trace initialized...</div>
+              )}
+            </div>
           </div>
-          <div className="max-h-44 overflow-y-auto border border-black">
-            <table className="w-full text-left border-collapse text-[11px]">
-              <thead>
-                <tr className="bg-neutral-100 border-b border-black">
-                  <th className="p-1 border-r border-black">Sample #</th>
-                  <th className="p-1 border-r border-black">Event Trigger</th>
-                  <th className="p-1 border-r border-black">Components Modified</th>
-                  <th className="p-1 border-r border-black">Latency</th>
-                  <th className="p-1">Device Executed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {telemetry?.component_modifications && telemetry.component_modifications.length > 0 ? (
-                  telemetry.component_modifications
-                    .slice(-15)
-                    .reverse()
-                    .map((m, idx) => (
-                      <tr key={idx} className="border-b border-black last:border-b-0">
-                        <td className="p-1 border-r border-black font-bold">#{m.sample_index}</td>
-                        <td className="p-1 border-r border-black">{m.event}</td>
-                        <td className="p-1 border-r border-black">{m.components_affected} sub-components</td>
-                        <td className="p-1 border-r border-black">{m.adaptation_latency_ms}ms</td>
-                        <td className="p-1">{m.device}</td>
-                      </tr>
-                    ))
-                ) : (
-                  <tr>
-                    <td colSpan={5} className="p-2 text-center text-neutral-500">
-                      No adaptation events recorded yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Feature Rankings Table */}
-        <div className="border border-black p-2.5 bg-white">
-          <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 text-[11px]">
-            ONLINE FEATURE SELECTION & RELEVANCE TRACKER
-          </div>
-          <div className="max-h-44 overflow-y-auto border border-black">
-            <table className="w-full text-left border-collapse text-[11px]">
-              <thead>
-                <tr className="bg-neutral-100 border-b border-black">
-                  <th className="p-1 border-r border-black">Rank</th>
-                  <th className="p-1 border-r border-black">Feature Identifier</th>
-                  <th className="p-1 border-r border-black">Index</th>
-                  <th className="p-1">Active In Ensemble</th>
-                </tr>
-              </thead>
-              <tbody>
-                {telemetry?.feature_rankings && telemetry.feature_rankings.length > 0 ? (
-                  telemetry.feature_rankings.map((f, idx) => (
-                    <tr key={idx} className="border-b border-black last:border-b-0">
-                      <td className="p-1 border-r border-black font-bold">{f.rank}</td>
-                      <td className="p-1 border-r border-black">{f.feature_name}</td>
-                      <td className="p-1 border-r border-black">{f.feature_index}</td>
-                      <td className="p-1 font-bold">YES (Retained)</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={4} className="p-2 text-center text-neutral-500">
-                      Feature tracking initializes during warmup.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      {/* Real-time Process Console */}
-      <div className="border border-black p-2.5 bg-white">
-        <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 flex justify-between items-center text-[11px]">
-          <span>REAL-TIME PROCESS EXECUTION CONSOLE</span>
-          <div className="flex gap-2 items-center">
-            <button
-              type="button"
-              className="border border-black px-1.5 py-0.5 text-[10px] uppercase font-bold hover:bg-black hover:text-white"
-              onClick={() => triggerExport("logs")}
-            >
-              EXPORT LOGS (TXT)
-            </button>
-            <span className="text-[10px] text-neutral-500">LOGSTREAM</span>
-          </div>
-        </div>
-        <div
-          ref={logConsoleRef}
-          className="h-44 overflow-y-auto border border-black p-2 text-[11px] font-mono bg-white flex flex-col gap-0.5"
-        >
-          {telemetry?.logs && telemetry.logs.length > 0 ? (
-            telemetry.logs.map((l, idx) => {
-              let cls = "text-black";
-              if (l.level === "WARNING") cls = "font-bold underline";
-              if (l.level === "ERROR") cls = "bg-black text-white px-1 font-bold";
-              return (
-                <div key={idx} className={cls}>
-                  [{l.timestamp}] [{l.level}] {l.message}
-                </div>
-              );
-            })
-          ) : (
-            <div className="text-neutral-400">Awaiting stream execution start...</div>
-          )}
-        </div>
-      </div>
+        )}
+      </section>
     </div>
   );
 }
