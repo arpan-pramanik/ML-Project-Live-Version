@@ -158,10 +158,54 @@ def test_forward_prediction_trajectory_5s_intervals():
     assert all(s["price"] > price for s in steps)
 
 
+def test_balanced_micro_tick_labeling():
+    """Verify stream resolves pending samples at target_tick with balanced directional labeling."""
+    stream = CoinbaseLiveStream(product_id="BTC-USD", window_size=5, prediction_horizon=3)
+    
+    # Simulate 10 ticks
+    stream.tick_count = 1
+    stream.pending_samples.append({
+        "sample_id": 1,
+        "features": np.zeros(9, dtype=np.float32),
+        "price": 100.0,
+        "timestamp": time.time(),
+        "meta": {"ofi": 1.0},
+        "target_tick": 4,
+    })
+    stream.pending_samples.append({
+        "sample_id": 2,
+        "features": np.zeros(9, dtype=np.float32),
+        "price": 105.0,
+        "timestamp": time.time(),
+        "meta": {"ofi": -1.0},
+        "target_tick": 5,
+    })
+
+    # At tick 3, nothing should resolve yet
+    stream.tick_count = 3
+    stream._resolve_pending_samples(102.0)
+    assert stream.queue.empty()
+
+    # At tick 4, sample 1 resolves (100.0 -> 102.0 is UP, so label 1)
+    stream.tick_count = 4
+    stream._resolve_pending_samples(102.0)
+    assert stream.queue.qsize() == 1
+    s1 = stream.queue.get()
+    assert s1[1] == 1  # UP
+
+    # At tick 5, sample 2 resolves (105.0 -> 102.0 is DOWN, so label 0)
+    stream.tick_count = 5
+    stream._resolve_pending_samples(102.0)
+    assert stream.queue.qsize() == 1
+    s2 = stream.queue.get()
+    assert s2[1] == 0  # DOWN
+
+
 if __name__ == "__main__":
     test_concept_graph_memory()
     test_downstream_risk_engine()
     test_graph_memory_adaptive_model()
     test_coinbase_feature_extraction()
     test_forward_prediction_trajectory_5s_intervals()
+    test_balanced_micro_tick_labeling()
     print("\nALL LIVE STREAM & GRAPH MEMORY TESTS PASSED!")

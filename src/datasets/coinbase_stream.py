@@ -37,7 +37,7 @@ class CoinbaseLiveStream:
         self.session_file = f"data/session_{prod_slug}.csv"
         self.history_file = f"data/history_{prod_slug}_2019_2026.csv"
 
-        self.queue: queue.Queue = queue.Queue(maxsize=10000)
+        self.queue: queue.Queue = queue.Queue(maxsize=30000)
         self.running = False
         self.connected = False
         self.thread: Optional[threading.Thread] = None
@@ -52,8 +52,8 @@ class CoinbaseLiveStream:
         self.price_history = collections.deque(maxlen=10000)
 
         # Pending prediction queue for prequential ground-truth label assignment
-        # Stores (sample_id, features, current_price, timestamp, metadata)
-        self.pending_samples = collections.deque(maxlen=1000)
+        # Stores (sample_id, features, current_price, timestamp, metadata, target_tick)
+        self.pending_samples = collections.deque(maxlen=10000)
         self.sample_counter = 0
 
         # Latest ticker cache
@@ -177,24 +177,14 @@ class CoinbaseLiveStream:
                         parts = line.strip().split(',')
                         if len(parts) == 4:
                             now, price, volume, side = parts
-                            self.prices.append(float(price))
-                            self.volumes.append(float(volume))
-                            self.timestamps.append(float(now))
-                            self.sides.append(float(side))
-                            self.price_history.append({
+                            msg = {
+                                "type": "ticker",
                                 "price": float(price),
-                                "volume": float(volume),
+                                "size": float(volume),
+                                "side": "buy" if float(side) > 0 else "sell",
                                 "timestamp": float(now),
-                                "time_str": time.strftime("%H:%M:%S", time.localtime(float(now))),
-                            })
-                            self._resolve_pending_samples(float(price))
-                            if len(self.prices) >= 10:
-                                features, meta = self._extract_features()
-                                self.sample_counter += 1
-                                self.pending_samples.append({
-                                    "sample_id": self.sample_counter, "features": features, "price": float(price),
-                                    "timestamp": float(now), "meta": meta, "horizon_ticks": self.prediction_horizon,
-                                })
+                            }
+                            self._handle_message(msg, is_historical=True)
                             count += 1
                 print(f"[CoinbaseStream] Restored {count} offline ticks for {self.product_id}.")
             except Exception as e:
@@ -320,7 +310,7 @@ class CoinbaseLiveStream:
                 "price": price,
                 "timestamp": now,
                 "meta": meta,
-                "horizon_ticks": self.prediction_horizon,
+                "target_tick": self.tick_count + self.prediction_horizon,
             })
 
     def _extract_features(self) -> Tuple[np.ndarray, Dict[str, Any]]:
@@ -402,31 +392,34 @@ class CoinbaseLiveStream:
 
     def _resolve_pending_samples(self, current_price: float):
         """Compare current price against pending samples to emit resolved (X, y) ground truth."""
-        while self.pending_samples:
-            sample = self.pending_samples[0]
-            sample["horizon_ticks"] -= 1
+        while self.pending_samples and self.pending_samples[0]["target_tick"] <= self.tick_count:
+            sample = self.pending_samples.popleft()
+            entry_price = sample["price"]
+            price_diff = current_price - entry_price
 
-            if sample["horizon_ticks"] <= 0:
-                self.pending_samples.popleft()
-                entry_price = sample["price"]
-                price_diff = (current_price - entry_price) / max(1e-6, entry_price)
-
-                # Binary classification label: 1 if price went UP, 0 if DOWN or flat
-                label = 1 if price_diff > self.price_change_threshold else 0
-                sample["meta"]["exit_price"] = current_price
-                sample["meta"]["price_return"] = price_diff
-
-                try:
-                    self.queue.put_nowait((sample["features"], label, sample["meta"]))
-                except queue.Full:
-                    # Drop oldest if queue full to prevent memory leak
-                    try:
-                        self.queue.get_nowait()
-                        self.queue.put_nowait((sample["features"], label, sample["meta"]))
-                    except Exception:
-                        pass
+            # Balanced micro-tick ground-truth labeling:
+            # Strictly positive price change -> 1 (UP)
+            # Strictly negative price change -> 0 (DOWN)
+            # Unchanged/flat trade -> resolved by Order Flow Imbalance (OFI / net buyer aggression)
+            if price_diff > 0:
+                label = 1
+            elif price_diff < 0:
+                label = 0
             else:
-                break
+                ofi = sample["meta"].get("ofi", 0.0)
+                label = 1 if ofi >= 0 else 0
+
+            sample["meta"]["exit_price"] = current_price
+            sample["meta"]["price_return"] = price_diff / max(1e-6, entry_price)
+
+            try:
+                self.queue.put_nowait((sample["features"], label, sample["meta"]))
+            except queue.Full:
+                try:
+                    self.queue.get_nowait()
+                    self.queue.put_nowait((sample["features"], label, sample["meta"]))
+                except Exception:
+                    pass
 
     def get_sample(self, timeout: float = 1.0) -> Optional[Tuple[np.ndarray, int, Dict[str, Any]]]:
         """Fetch the next resolved streaming sample."""
