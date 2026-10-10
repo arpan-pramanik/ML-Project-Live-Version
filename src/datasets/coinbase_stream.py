@@ -33,7 +33,7 @@ class CoinbaseLiveStream:
         self.prediction_horizon = prediction_horizon
         self.price_change_threshold = price_change_threshold
 
-        self.queue: queue.Queue = queue.Queue(maxsize=2000)
+        self.queue: queue.Queue = queue.Queue(maxsize=10000)
         self.running = False
         self.connected = False
         self.thread: Optional[threading.Thread] = None
@@ -78,33 +78,70 @@ class CoinbaseLiveStream:
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=2.0)
 
-    def load_historical_data(self, limit: int = 300):
-        """Pretrain on historical data up to today (Oct 10 2026) using REST API."""
+    def load_historical_data(self, full_history: bool = False):
+        """Pretrain on historical data (either recent 300 minutes or deep history from 2019) using REST API."""
         import requests
-        print(f"[CoinbaseStream] Pre-training on historical data for {self.product_id} (up to {limit} minutes)...")
-        try:
-            # 60s granularity, returns up to 300 recent candles
-            res = requests.get(f"https://api.exchange.coinbase.com/products/{self.product_id}/candles?granularity=60")
-            if res.status_code == 200:
-                data = res.json()
-                # data is [ [time, low, high, open, close, volume], ... ]
-                # sorted descending by time, so we reverse it to process chronologically
-                candles = list(reversed(data[:limit]))
-                for candle in candles:
-                    ts = float(candle[0])
-                    close_p = float(candle[4])
-                    vol = float(candle[5])
+        import datetime
+        import time
+        
+        if full_history:
+            print(f"[CoinbaseStream] Pre-training on DEEP historical data for {self.product_id} from 2019 to today...")
+            # Fetch daily candles from 2019
+            current_time = datetime.datetime(2019, 1, 1, tzinfo=datetime.timezone.utc)
+            end_time = datetime.datetime.now(datetime.timezone.utc)
+            all_candles = []
+            
+            while current_time < end_time:
+                next_time = current_time + datetime.timedelta(days=300)
+                if next_time > end_time:
+                    next_time = end_time
                     
-                    # Construct a synthetic tick
-                    msg = {
-                        "type": "ticker",
-                        "price": close_p,
-                        "size": vol,
-                        "side": "buy" if np.random.random() > 0.5 else "sell",
-                        "timestamp": ts,
-                    }
-                    self._handle_message(msg)
-                print(f"[CoinbaseStream] Preloaded {len(candles)} historical candles for pretraining.")
+                params = {
+                    "granularity": 86400,
+                    "start": current_time.isoformat(),
+                    "end": next_time.isoformat()
+                }
+                try:
+                    res = requests.get(f"https://api.exchange.coinbase.com/products/{self.product_id}/candles", params=params)
+                    if res.status_code == 200:
+                        data = res.json()
+                        if not data:
+                            break
+                        all_candles.extend(data)
+                    time.sleep(0.15)
+                except Exception:
+                    break
+                current_time = next_time
+                
+            # Sort ascending by time
+            all_candles.sort(key=lambda x: x[0])
+            candles = all_candles
+        else:
+            print(f"[CoinbaseStream] Pre-training on recent historical data for {self.product_id} (up to 300 minutes)...")
+            try:
+                res = requests.get(f"https://api.exchange.coinbase.com/products/{self.product_id}/candles?granularity=60")
+                if res.status_code == 200:
+                    data = res.json()
+                    candles = list(reversed(data[:300]))
+                else:
+                    candles = []
+            except Exception:
+                candles = []
+                
+        try:
+            for candle in candles:
+                ts = float(candle[0])
+                close_p = float(candle[4])
+                vol = float(candle[5])
+                msg = {
+                    "type": "ticker",
+                    "price": close_p,
+                    "size": vol,
+                    "side": "buy" if np.random.random() > 0.5 else "sell",
+                    "timestamp": ts,
+                }
+                self._handle_message(msg)
+            print(f"[CoinbaseStream] Preloaded {len(candles)} historical candles for pretraining.")
         except Exception as e:
             print(f"[CoinbaseStream] Failed to load historical data: {e}")
 

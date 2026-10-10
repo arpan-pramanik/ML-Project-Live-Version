@@ -317,9 +317,16 @@ class DriftMoEClassifier:
                 n_b = len(X_buf)
                 for exp_idx in drift_signals:
                     if exp_idx == 0:
-                        # Retrain GPU XGBoost expert on fresh buffer
-                        self.xgb_expert = self._init_xgb_expert()
-                        self.xgb_expert.fit(X_scaled_buf, y_buf)
+                        # Retrain GPU XGBoost expert incrementally
+                        if self.xgb_expert is not None:
+                            try:
+                                self.xgb_expert.fit(X_scaled_buf, y_buf, xgb_model=self.xgb_expert.get_booster())
+                            except Exception:
+                                self.xgb_expert = self._init_xgb_expert()
+                                self.xgb_expert.fit(X_scaled_buf, y_buf)
+                        else:
+                            self.xgb_expert = self._init_xgb_expert()
+                            self.xgb_expert.fit(X_scaled_buf, y_buf)
                     elif exp_idx < self.n_experts - 1:
                         # Retrain individual decision tree expert
                         tree_idx = exp_idx - 1

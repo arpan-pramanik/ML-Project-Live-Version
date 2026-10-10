@@ -115,8 +115,16 @@ class GPUAcceleratedAdaptiveXGBoost:
             X_train = np.array(self.buffer_X, dtype=np.float32)
             y_train = np.array(self.buffer_y, dtype=int)
             if len(np.unique(y_train)) > 1:
-                self.model = self._build_model()
-                self.model.fit(X_train, y_train)
+                if self.model is not None:
+                    # Incremental learning: boost additional trees onto existing model
+                    try:
+                        self.model.fit(X_train, y_train, xgb_model=self.model.get_booster())
+                    except Exception:
+                        self.model = self._build_model()
+                        self.model.fit(X_train, y_train)
+                else:
+                    self.model = self._build_model()
+                    self.model.fit(X_train, y_train)
                 self.adaptation_count += 1
             t1 = time.perf_counter()
             self.total_adaptation_time += (t1 - t0)

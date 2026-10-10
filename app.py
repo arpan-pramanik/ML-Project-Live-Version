@@ -339,8 +339,8 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
 
     stream = CoinbaseLiveStream(product_id=product, window_size=30, prediction_horizon=2)
     
-    TELEMETRY.log(f"Pre-training streaming model on historical 1-minute candles up to {time.strftime('%b %d %Y')} to bootstrap concept graph...")
-    stream.load_historical_data(limit=300)
+    TELEMETRY.log(f"Pre-training streaming model on deep historical data (2019 to {time.strftime('%Y')}) to bootstrap concept graph...")
+    stream.load_historical_data(full_history=True)
     
     stream.start()
 
