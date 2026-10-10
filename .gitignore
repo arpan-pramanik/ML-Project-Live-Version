@@ -8,8 +8,12 @@ temp_*
 dist/
 build/
 venv/
+venv
 .venv/
+.venv
 *.log
 .cache/
 .atreus.pids
 data/custom_stream.csv
+*.pem
+*.key

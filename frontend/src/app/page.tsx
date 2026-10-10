@@ -52,6 +52,80 @@ interface LogEntry {
   details?: Record<string, unknown>;
 }
 
+interface GraphNode {
+  id: number;
+  label: string;
+  is_active: boolean;
+  samples: number;
+  accuracy: number;
+  variance_scale: number;
+  created_at: number;
+  last_active_step: number;
+}
+
+interface GraphEdge {
+  from: number;
+  to: number;
+  weight: number;
+  probability: number;
+  is_active_transition: boolean;
+}
+
+interface GraphMemoryState {
+  active_node_id: number | null;
+  total_nodes: number;
+  recall_count: number;
+  spawn_count: number;
+  total_queries: number;
+  last_action: string;
+  last_distance: number;
+  similarity_threshold: number;
+  next_predicted_regime: number | null;
+  next_predicted_probability: number;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+interface PortfolioState {
+  capital: number;
+  pnl: number;
+  pnl_pct: number;
+  position: number;
+  trades: number;
+  win_rate: number;
+  max_drawdown: number;
+  risk_status?: string;
+}
+
+interface DownstreamState {
+  adaptive: PortfolioState;
+  static: PortfolioState;
+  retrain: PortfolioState;
+  recent_actions: Array<{
+    timestamp: string;
+    price: number;
+    signal: string;
+    confidence: number;
+    risk_action: string;
+    drift: boolean;
+    graph_action: string;
+    adaptive_pnl: number;
+    static_pnl: number;
+  }>;
+}
+
+interface LiveStreamStatus {
+  source: string;
+  product_id: string;
+  connected: boolean;
+  running: boolean;
+  latest_price: number;
+  latest_volume: number;
+  total_ticks: number;
+  tick_rate: number;
+  elapsed_seconds: number;
+}
+
 interface TelemetrySnapshot {
   running: boolean;
   dataset_name: string;
@@ -73,12 +147,17 @@ interface TelemetrySnapshot {
   trajectory: TrajectoryPoint[];
   feature_rankings: FeatureRank[];
   component_modifications: ComponentMod[];
+  graph_memory?: GraphMemoryState;
+  downstream?: DownstreamState;
+  live_stream_status?: LiveStreamStatus;
 }
 
 export default function ControlPanel() {
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetrySnapshot | null>(null);
   const [datasets, setDatasets] = useState<Array<{ id: string; name: string; type: string }>>([
+    { id: "coinbase_btc", name: "🔴 LIVE FEED: Coinbase BTC/USD WebSocket", type: "Live Exchange" },
+    { id: "coinbase_eth", name: "🔴 LIVE FEED: Coinbase ETH/USD WebSocket", type: "Live Exchange" },
     { id: "sea", name: "SEA Concepts Benchmark (10,000 Samples)", type: "Synthetic Abrupt" },
     { id: "agrawal", name: "Agrawal Stream Benchmark (10,000 Samples)", type: "Synthetic Subspace" },
     { id: "electricity", name: "NSW Electricity Market (45,312 Samples)", type: "Real Recurring" },
@@ -89,11 +168,11 @@ export default function ControlPanel() {
     { id: "hf_credit", name: "Hugging Face: Credit Default Risk (13,272 Samples)", type: "Hugging Face" },
   ]);
 
-  const [selectedDataset, setSelectedDataset] = useState("sea");
-  const [selectedModel, setSelectedModel] = useState("proposed");
+  const [selectedDataset, setSelectedDataset] = useState("coinbase_btc");
+  const [selectedModel, setSelectedModel] = useState("graph_memory_adaptive");
   const [selectedDetector, setSelectedDetector] = useState("adwin");
-  const [warmup, setWarmup] = useState(500);
-  const [windowSize, setWindowSize] = useState(200);
+  const [warmup, setWarmup] = useState(20);
+  const [windowSize, setWindowSize] = useState(50);
 
   const [showAddDataset, setShowAddDataset] = useState(false);
   const [hfInput, setHfInput] = useState("");
@@ -422,6 +501,30 @@ export default function ControlPanel() {
         })}
       </div>
 
+      {/* Live Market WebSocket Status Banner */}
+      {(selectedDataset.startsWith("coinbase") || telemetry?.live_stream_status?.running) && (
+        <div className="border border-black p-2.5 bg-black text-white flex justify-between items-center text-[11px]">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 font-bold uppercase tracking-wide">
+              <span className={`inline-block w-2.5 h-2.5 rounded-full ${telemetry?.live_stream_status?.connected ? "bg-emerald-400 animate-pulse" : "bg-neutral-500"}`} />
+              COINBASE WEBSOCKET: {telemetry?.live_stream_status?.product_id || (selectedDataset.includes("eth") ? "ETH-USD" : "BTC-USD")}
+            </span>
+            <span className="text-neutral-500">|</span>
+            <span className="font-bold text-emerald-400 text-[14px]">
+              ${telemetry?.live_stream_status?.latest_price ? telemetry.live_stream_status.latest_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "WAITING TICK..."}
+            </span>
+            <span className="text-neutral-500">|</span>
+            <span>TICKS: {(telemetry?.live_stream_status?.total_ticks || 0).toLocaleString()}</span>
+            <span>VELOCITY: {telemetry?.live_stream_status?.tick_rate || 0} ticks/sec</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase font-mono text-neutral-300">
+              STATUS: {telemetry?.live_stream_status?.connected ? "CONNECTED (PUBLIC FEED)" : (telemetry?.running ? "CONNECTING..." : "DISCONNECTED")}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Main Grid: Config & Primary Metrics */}
       <div className="grid grid-cols-2 gap-3">
         {/* Configuration */}
@@ -505,6 +608,7 @@ export default function ControlPanel() {
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
                 >
+                  <option value="graph_memory_adaptive">Graph Memory Concept Topology Adaptive Model (0ms Recall)</option>
                   <option value="proposed">Proposed Selective Adapt (RF + SVM + Online Scaler)</option>
                   <option value="drift_moe">DriftMoE (2026 Mixture of Experts + RTX 5070 CUDA)</option>
                   <option value="boosted_forest">Boosted ARF-DWM Forest (Shadow Trees)</option>
@@ -772,12 +876,309 @@ export default function ControlPanel() {
                 strokeDasharray="2,2"
               />
             ))}
-
             {/* Cumulative Accuracy Path */}
             {dCum && <path d={dCum} fill="none" stroke="#000000" strokeWidth="2" />}
             {/* Windowed Accuracy Path */}
             {dWin && <path d={dWin} fill="none" stroke="#000000" strokeWidth="1" strokeDasharray="3,3" />}
           </svg>
+        </div>
+      </div>
+
+      {/* Concept Topology Graph Memory Visualizer */}
+      <div className="border border-black p-2.5 bg-white">
+        <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 flex justify-between items-center text-[11px]">
+          <div className="flex items-center gap-2">
+            <span>CONCEPT TOPOLOGY GRAPH MEMORY (RECURRING REGIME ADAPTATION)</span>
+            <span className="bg-black text-white px-1.5 py-0.2 text-[9px] font-bold">
+              LIFELONG CONTINUAL LEARNING
+            </span>
+          </div>
+          <div className="flex gap-2 items-center text-[10px]">
+            <span className="font-bold">LAST ACTION:</span>
+            <span className="bg-neutral-100 border border-black px-1.5 py-0.5 font-bold uppercase">
+              {telemetry?.graph_memory?.last_action || "INITIALIZED"}
+            </span>
+          </div>
+        </div>
+
+        {/* Graph Memory Telemetry Stats */}
+        <div className="grid grid-cols-6 gap-2 mb-3">
+          <div className="border border-black p-1.5">
+            <div className="text-[9px] uppercase text-neutral-600">DISCOVERED REGIMES</div>
+            <div className="text-[16px] font-bold">{telemetry?.graph_memory?.total_nodes || 1} Nodes</div>
+            <div className="text-[9px] text-neutral-500">Topological States</div>
+          </div>
+          <div className="border border-black p-1.5 bg-neutral-50">
+            <div className="text-[9px] uppercase text-neutral-600 font-bold">INSTANT RECALLS</div>
+            <div className="text-[16px] font-bold text-emerald-600">
+              {telemetry?.graph_memory?.recall_count || 0}
+            </div>
+            <div className="text-[9px] text-emerald-700 font-bold">0ms Retraining Time</div>
+          </div>
+          <div className="border border-black p-1.5">
+            <div className="text-[9px] uppercase text-neutral-600">NOVEL REGIME SPAWNS</div>
+            <div className="text-[16px] font-bold">{telemetry?.graph_memory?.spawn_count || 0}</div>
+            <div className="text-[9px] text-neutral-500">Unseen Distributions</div>
+          </div>
+          <div className="border border-black p-1.5">
+            <div className="text-[9px] uppercase text-neutral-600">ACTIVE REGIME</div>
+            <div className="text-[14px] font-bold">
+              Regime #{telemetry?.graph_memory?.active_node_id ?? 0}
+            </div>
+            <div className="text-[9px] text-neutral-500">Active Expert Head</div>
+          </div>
+          <div className="border border-black p-1.5">
+            <div className="text-[9px] uppercase text-neutral-600">CENTROID DISTANCE</div>
+            <div className="text-[14px] font-bold">
+              {telemetry?.graph_memory?.last_distance || 0.0}
+            </div>
+            <div className="text-[9px] text-neutral-500">
+              Threshold: {telemetry?.graph_memory?.similarity_threshold || 1.8}
+            </div>
+          </div>
+          <div className="border border-black p-1.5 bg-neutral-50">
+            <div className="text-[9px] uppercase text-neutral-600 font-bold">ANTICIPATED NEXT</div>
+            <div className="text-[14px] font-bold text-neutral-800">
+              Regime #{telemetry?.graph_memory?.next_predicted_regime ?? 0}
+            </div>
+            <div className="text-[9px] text-neutral-600 font-bold">
+              {telemetry?.graph_memory?.next_predicted_probability || 0}% Markov Prob
+            </div>
+          </div>
+        </div>
+
+        {/* Dynamic Concept Node Cards */}
+        <div className="border border-black p-2 bg-neutral-50 mb-2">
+          <div className="text-[10px] font-bold uppercase mb-1.5 flex justify-between">
+            <span>TOPOLOGICAL CONCEPT NODES & EXPERT ACCURACY</span>
+            <span className="text-neutral-500 font-normal">● GLOWING = ACTIVE REGIME EXPERT</span>
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {telemetry?.graph_memory?.nodes && telemetry.graph_memory.nodes.length > 0 ? (
+              telemetry.graph_memory.nodes.map((node) => (
+                <div
+                  key={node.id}
+                  className={`border p-2 text-[11px] ${
+                    node.is_active
+                      ? "border-black bg-white shadow-sm ring-2 ring-black"
+                      : "border-neutral-300 bg-white"
+                  }`}
+                >
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="font-bold text-[10px] uppercase truncate">{node.label}</span>
+                    {node.is_active && (
+                      <span className="bg-black text-white px-1 text-[8px] font-bold uppercase">
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex justify-between text-[10px] text-neutral-600 border-t border-neutral-200 pt-1">
+                    <span>SAMPLES: {node.samples.toLocaleString()}</span>
+                    <span className="font-bold text-black">{node.accuracy}% ACC</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="col-span-4 text-center py-2 text-neutral-500 text-[11px]">
+                Concept graph initializes as stream flows...
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Transition Edges Matrix */}
+        {telemetry?.graph_memory?.edges && telemetry.graph_memory.edges.length > 0 && (
+          <div className="border border-neutral-300 p-1.5 bg-white text-[10px] flex items-center gap-2 overflow-x-auto">
+            <span className="font-bold uppercase whitespace-nowrap">MARKOV TRANSITIONS:</span>
+            <div className="flex gap-2">
+              {telemetry.graph_memory.edges.slice(-6).map((edge, idx) => (
+                <span
+                  key={idx}
+                  className={`border px-1.5 py-0.5 whitespace-nowrap ${
+                    edge.is_active_transition ? "border-black font-bold bg-neutral-100" : "border-neutral-200 text-neutral-600"
+                  }`}
+                >
+                  Regime #{edge.from} → #{edge.to} ({(edge.probability * 100).toFixed(0)}%)
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Downstream Real-World Execution & Dynamic Risk Cockpit */}
+      <div className="border border-black p-2.5 bg-white">
+        <div className="font-bold uppercase tracking-wide border-b border-black pb-1 mb-2 flex justify-between items-center text-[11px]">
+          <div className="flex items-center gap-2">
+            <span>DOWNSTREAM EXECUTION & DYNAMIC RISK CONTROL COCKPIT</span>
+            <span className="bg-neutral-100 border border-black px-1.5 py-0.2 text-[9px] font-bold uppercase">
+              CAPITAL PRESERVATION & PNL
+            </span>
+          </div>
+          <span className="text-[10px] font-mono text-neutral-600">INITIAL CAPITAL: $10,000.00</span>
+        </div>
+
+        {/* 3-Way Comparative Financial Scoreboard */}
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          {/* 1. Graph Memory Adaptive Strategy */}
+          <div className="border-2 border-black p-2.5 bg-neutral-50 flex flex-col justify-between">
+            <div>
+              <div className="flex justify-between items-center border-b border-black pb-1 mb-1.5">
+                <span className="font-bold text-[11px] uppercase">1. GRAPH ADAPTIVE MODEL</span>
+                <span className="bg-black text-white text-[8px] font-bold px-1 uppercase">OUR FRAMEWORK</span>
+              </div>
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-[20px] font-bold">
+                  ${(telemetry?.downstream?.adaptive?.capital || 10000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span
+                  className={`text-[12px] font-bold ${
+                    (telemetry?.downstream?.adaptive?.pnl || 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+                  }`}
+                >
+                  {(telemetry?.downstream?.adaptive?.pnl || 0) >= 0 ? "+" : ""}
+                  {(telemetry?.downstream?.adaptive?.pnl || 0).toFixed(2)} (
+                  {(telemetry?.downstream?.adaptive?.pnl_pct || 0).toFixed(2)}%)
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600 border-t border-neutral-300 pt-1.5">
+                <div>
+                  <span className="block text-[8px] uppercase">WIN RATE</span>
+                  <span className="font-bold text-black">{telemetry?.downstream?.adaptive?.win_rate || 0}%</span>
+                </div>
+                <div>
+                  <span className="block text-[8px] uppercase">POSITION</span>
+                  <span className="font-bold text-black">
+                    {(telemetry?.downstream?.adaptive?.position || 0) > 0 ? "+" : ""}
+                    {telemetry?.downstream?.adaptive?.position || 0}
+                  </span>
+                </div>
+                <div>
+                  <span className="block text-[8px] uppercase">MAX DRAWDOWN</span>
+                  <span className="font-bold text-black">{telemetry?.downstream?.adaptive?.max_drawdown || 0}%</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-2 pt-1 border-t border-neutral-300 text-[9px] font-bold uppercase text-neutral-700">
+              RISK PROTOCOL: {telemetry?.downstream?.adaptive?.risk_status || "NORMAL (100% Budget)"}
+            </div>
+          </div>
+
+          {/* 2. Static Baseline Model */}
+          <div className="border border-black p-2.5 bg-white flex flex-col justify-between">
+            <div>
+              <div className="flex justify-between items-center border-b border-black pb-1 mb-1.5">
+                <span className="font-bold text-[11px] uppercase">2. STATIC BASELINE (NO ADAPT)</span>
+                <span className="border border-black text-[8px] font-bold px-1 uppercase text-neutral-600">FROZEN WEIGHTS</span>
+              </div>
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-[20px] font-bold">
+                  ${(telemetry?.downstream?.static?.capital || 10000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span
+                  className={`text-[12px] font-bold ${
+                    (telemetry?.downstream?.static?.pnl || 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+                  }`}
+                >
+                  {(telemetry?.downstream?.static?.pnl || 0) >= 0 ? "+" : ""}
+                  {(telemetry?.downstream?.static?.pnl || 0).toFixed(2)} (
+                  {(telemetry?.downstream?.static?.pnl_pct || 0).toFixed(2)}%)
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600 border-t border-neutral-300 pt-1.5">
+                <div>
+                  <span className="block text-[8px] uppercase">WIN RATE</span>
+                  <span className="font-bold text-black">{telemetry?.downstream?.static?.win_rate || 0}%</span>
+                </div>
+                <div>
+                  <span className="block text-[8px] uppercase">POSITION</span>
+                  <span className="font-bold text-black">{telemetry?.downstream?.static?.position || 0}</span>
+                </div>
+                <div>
+                  <span className="block text-[8px] uppercase">MAX DRAWDOWN</span>
+                  <span className="font-bold text-black">{telemetry?.downstream?.static?.max_drawdown || 0}%</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-2 pt-1 border-t border-neutral-300 text-[9px] uppercase text-rose-600 font-bold">
+              DEFENSIVE ADAPTATION: DISABLED (NO DRIFT RECOVERY)
+            </div>
+          </div>
+
+          {/* 3. Full Retrain Baseline */}
+          <div className="border border-black p-2.5 bg-white flex flex-col justify-between">
+            <div>
+              <div className="flex justify-between items-center border-b border-black pb-1 mb-1.5">
+                <span className="font-bold text-[11px] uppercase">3. FULL RETRAINING BASELINE</span>
+                <span className="border border-black text-[8px] font-bold px-1 uppercase text-neutral-600">PERIODIC REFIT</span>
+              </div>
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-[20px] font-bold">
+                  ${(telemetry?.downstream?.retrain?.capital || 10000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span
+                  className={`text-[12px] font-bold ${
+                    (telemetry?.downstream?.retrain?.pnl || 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+                  }`}
+                >
+                  {(telemetry?.downstream?.retrain?.pnl || 0) >= 0 ? "+" : ""}
+                  {(telemetry?.downstream?.retrain?.pnl || 0).toFixed(2)} (
+                  {(telemetry?.downstream?.retrain?.pnl_pct || 0).toFixed(2)}%)
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600 border-t border-neutral-300 pt-1.5">
+                <div>
+                  <span className="block text-[8px] uppercase">WIN RATE</span>
+                  <span className="font-bold text-black">{telemetry?.downstream?.retrain?.win_rate || 0}%</span>
+                </div>
+                <div>
+                  <span className="block text-[8px] uppercase">POSITION</span>
+                  <span className="font-bold text-black">{telemetry?.downstream?.retrain?.position || 0}</span>
+                </div>
+                <div>
+                  <span className="block text-[8px] uppercase">MAX DRAWDOWN</span>
+                  <span className="font-bold text-black">{telemetry?.downstream?.retrain?.max_drawdown || 0}%</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-2 pt-1 border-t border-neutral-300 text-[9px] uppercase text-neutral-500 font-bold">
+              PENALTY: HIGH RETRAINING LATENCY SPIKES
+            </div>
+          </div>
+        </div>
+
+        {/* Live Execution Action Ticker */}
+        <div className="border border-neutral-300 p-2 bg-neutral-50">
+          <div className="text-[10px] font-bold uppercase mb-1 flex justify-between">
+            <span>REAL-TIME EXECUTION & CIRCUIT BREAKER ACTION STREAM</span>
+            <span className="text-neutral-500 font-normal">RECENT DECISION TICKS</span>
+          </div>
+          <div className="max-h-24 overflow-y-auto flex flex-col gap-1 text-[10px] font-mono">
+            {telemetry?.downstream?.recent_actions && telemetry.downstream.recent_actions.length > 0 ? (
+              telemetry.downstream.recent_actions.map((act, i) => (
+                <div key={i} className="flex justify-between items-center border-b border-neutral-200 pb-0.5 last:border-b-0">
+                  <div className="flex gap-2 items-center">
+                    <span className="text-neutral-500">[{act.timestamp}]</span>
+                    <span className="font-bold">${act.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className={`font-bold px-1 ${act.signal === "BUY" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>
+                      {act.signal} ({act.confidence}%)
+                    </span>
+                    <span className="text-neutral-700">{act.risk_action}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    {act.drift && <span className="bg-rose-600 text-white px-1 text-[8px] font-bold">DRIFT ALERT</span>}
+                    <span className={`font-bold ${act.adaptive_pnl >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                      PnL: ${act.adaptive_pnl.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-neutral-400 py-1 text-center font-sans">
+                Awaiting trade ticks and decision dispatch...
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
