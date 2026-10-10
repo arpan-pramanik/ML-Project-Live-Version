@@ -43,7 +43,9 @@ class CoinbaseLiveStream:
         self.volumes = collections.deque(maxlen=window_size)
         self.timestamps = collections.deque(maxlen=window_size)
         self.sides = collections.deque(maxlen=window_size)  # 1 for buy, -1 for sell
-        self.price_history = collections.deque(maxlen=60)
+        
+        # UI history buffer: keeping up to 10,000 points to show full 7-year history + live ticks
+        self.price_history = collections.deque(maxlen=10000)
 
         # Pending prediction queue for prequential ground-truth label assignment
         # Stores (sample_id, features, current_price, timestamp, metadata)
@@ -83,6 +85,42 @@ class CoinbaseLiveStream:
         import requests
         import datetime
         import time
+        import os
+        
+        # Session Persistence: If we have a local record, replay it to restore state and preserve offline gaps
+        if os.path.exists("data/local_stream_record.csv"):
+            print(f"[CoinbaseStream] Restoring session from local record (preserving offline timeline gap)...")
+            try:
+                count = 0
+                with open("data/local_stream_record.csv", "r") as f:
+                    for line in f:
+                        parts = line.strip().split(',')
+                        if len(parts) == 4:
+                            now, price, volume, side = parts
+                            # Push directly to state without writing back to CSV
+                            self.prices.append(float(price))
+                            self.volumes.append(float(volume))
+                            self.timestamps.append(float(now))
+                            self.sides.append(float(side))
+                            self.price_history.append({
+                                "price": float(price),
+                                "volume": float(volume),
+                                "timestamp": float(now),
+                                "time_str": time.strftime("%H:%M:%S", time.localtime(float(now))),
+                            })
+                            self._resolve_pending_samples(float(price))
+                            if len(self.prices) >= 10:
+                                features, meta = self._extract_features()
+                                self.sample_counter += 1
+                                self.pending_samples.append({
+                                    "sample_id": self.sample_counter, "features": features, "price": float(price),
+                                    "timestamp": float(now), "meta": meta, "horizon_ticks": self.prediction_horizon,
+                                })
+                            count += 1
+                print(f"[CoinbaseStream] Restored {count} ticks from local session record.")
+                return
+            except Exception as e:
+                print(f"[CoinbaseStream] Failed to load local record: {e}")
         
         if full_history:
             print(f"[CoinbaseStream] Pre-training on DEEP historical data for {self.product_id} from 2019 to today...")
@@ -241,6 +279,13 @@ class CoinbaseLiveStream:
             "timestamp": now,
             "time_str": time.strftime("%H:%M:%S", time.localtime(now)),
         })
+        
+        # Persist tick to local history file to remember session
+        try:
+            with open("data/local_stream_record.csv", "a") as f:
+                f.write(f"{now},{price},{volume},{side}\n")
+        except Exception:
+            pass
 
         # 1. Resolve pending samples whose prediction horizon has elapsed
         self._resolve_pending_samples(price)
