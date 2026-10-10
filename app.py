@@ -52,8 +52,6 @@ MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
 RUN_LOCK = threading.Lock()
 
 VALID_DATASETS = {
-    "sea", "agrawal", "electricity", "covertype", "airlines",
-    "hf_adult", "hf_bank", "hf_credit", "custom",
     "coinbase_btc", "coinbase_eth",
 }
 
@@ -233,10 +231,8 @@ def get_hardware_info() -> Dict[str, Any]:
 
 def load_dataset_by_key(key: str) -> Tuple[np.ndarray, np.ndarray, str]:
     """Resolve and load requested streaming dataset."""
-    if key == "sea":
         X, y, _ = generate_sea_stream(n_samples=5000, noise_ratio=0.05, seed=42)
         return X, y, "SEA Concepts Benchmark (5k Stream)"
-    elif key == "agrawal":
         X, y, _ = generate_agrawal_stream(n_samples=5000, noise_ratio=0.05, seed=42)
         return X, y, "Agrawal Benchmark (5k Stream)"
     elif key == "electricity":
@@ -245,9 +241,7 @@ def load_dataset_by_key(key: str) -> Tuple[np.ndarray, np.ndarray, str]:
         return load_covertype_stream(max_samples=10000)
     elif key == "airlines":
         return load_airlines_stream(max_samples=2000)
-    elif key == "hf_adult":
         return load_hf_adult_income_stream(max_samples=10000)
-    elif key == "hf_bank":
         return load_hf_bank_marketing_stream(max_samples=10000)
     elif key == "hf_credit":
         return load_hf_credit_default_stream(max_samples=10000)
@@ -862,13 +856,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             datasets_list = [
                 {"id": "coinbase_btc", "name": "🔴 LIVE FEED: Coinbase BTC/USD WebSocket", "features": 9, "type": "Live Exchange Stream"},
                 {"id": "coinbase_eth", "name": "🔴 LIVE FEED: Coinbase ETH/USD WebSocket", "features": 9, "type": "Live Exchange Stream"},
-                {"id": "sea", "name": "SEA Concepts Benchmark (5k)", "features": 3, "type": "Synthetic Abrupt"},
-                {"id": "agrawal", "name": "Agrawal Stream Benchmark (5k)", "features": 9, "type": "Synthetic Subspace"},
                 {"id": "electricity", "name": "NSW Electricity Market (10k)", "features": 8, "type": "Real-World Recurring"},
                 {"id": "covertype", "name": "Forest Covertype Stream (10k)", "features": 54, "type": "Real-World Multi-Class"},
                 {"id": "airlines", "name": "Airlines Flight Delay Stream (2k)", "features": 7, "type": "Real-World Delay"},
-                {"id": "hf_adult", "name": "Hugging Face: Adult Census Income (10k)", "features": 14, "type": "Hugging Face"},
-                {"id": "hf_bank", "name": "Hugging Face: Bank Marketing Stream (10k)", "features": 7, "type": "Hugging Face"},
                 {"id": "hf_credit", "name": "Hugging Face: Credit Default Risk (10k)", "features": 21, "type": "Hugging Face"},
             ]
             if os.path.exists("data/custom_stream.csv"):
@@ -899,7 +889,6 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                     self._send_json({"status": "error", "message": "Pipeline already running"}, status=400)
                     return
 
-                dataset_key = str(payload.get("dataset", "sea")).lower()
                 model_key = str(payload.get("model", "proposed")).lower()
                 detector_name = str(payload.get("detector", "adwin")).lower()
 

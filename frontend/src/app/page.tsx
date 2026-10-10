@@ -192,13 +192,11 @@ export default function ControlPanel() {
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetrySnapshot | null>(null);
   const [datasets, setDatasets] = useState<Array<{ id: string; name: string; type: string }>>([
-    { id: "coinbase_btc", name: "Coinbase BTC/USD Live WebSocket", type: "Live Exchange Feed" },
-    { id: "coinbase_eth", name: "Coinbase ETH/USD Live WebSocket", type: "Live Exchange Feed" },
-    { id: "sea", name: "SEA Concepts Benchmark (5,000 Samples)", type: "Synthetic Abrupt Drift" },
-    { id: "agrawal", name: "Agrawal Benchmark (5,000 Samples)", type: "Synthetic Subspace Drift" },
-    { id: "electricity", name: "NSW Electricity Market (10,000 Samples)", type: "Real Recurring Concept" },
-    { id: "covertype", name: "Forest Covertype Stream (10,000 Samples)", type: "Real Multi-Class Shift" },
-    { id: "airlines", name: "Airlines Flight Delay Stream (2,000 Samples)", type: "Real Distribution Drift" },
+    { id: "coinbase_btc", name: "Coinbase BTC/USD Live Feed", type: "Real-Time Exchange Data" },
+    { id: "coinbase_eth", name: "Coinbase ETH/USD Live Feed", type: "Real-Time Exchange Data" },
+    { id: "electricity", name: "NSW Electricity Market", type: "Real Recurring Concept" },
+    { id: "covertype", name: "Forest Covertype", type: "Real Multi-Class Shift" },
+    { id: "airlines", name: "Airlines Flight Delay", type: "Real Distribution Drift" },
   ]);
 
   const [selectedDataset, setSelectedDataset] = useState("coinbase_btc");
