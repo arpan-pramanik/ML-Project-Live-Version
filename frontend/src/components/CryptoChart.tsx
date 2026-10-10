@@ -31,6 +31,8 @@ export function CryptoChart({
             },
             timeScale: {
                 borderColor: '#e2e8f0',
+                timeVisible: true,
+                secondsVisible: true,
             },
             rightPriceScale: {
                 borderColor: '#e2e8f0',
@@ -79,24 +81,27 @@ export function CryptoChart({
         let lastKnownPrice: any = null;
 
         if (lineSeriesRef.current && prices && prices.length > 0) {
-            // Group all points by Day (86400 seconds) to create a pure Daily timeframe chart.
-            // This prevents live 1-second ticks from visually stretching out as a flat line 
-            // when plotted alongside 7 years of 1-day historical candles.
-            const dailyMap = new Map<number, number>();
+            // Quantize timestamps to 2-second multiples as requested.
+            // Preserves historical daily candles while allowing granular zoom down to seconds (:02, :04, :06) on live data.
+            const timeMap = new Map<number, number>();
             prices.forEach(p => {
-                const dayTime = Math.floor(p.timestamp / 86400) * 86400;
-                // Latest price overwrites previous prices for that day (acts as the live daily close)
-                dailyMap.set(dayTime, p.price);
+                if (!p || typeof p.price !== 'number' || typeof p.timestamp !== 'number') return;
+                // Quantize to 2-second multiple (even integer seconds)
+                const t2s = Math.floor(p.timestamp / 2) * 2;
+                timeMap.set(t2s, p.price);
             });
             
-            const uniqueLineData: LineData[] = Array.from(dailyMap.entries()).map(([time, value]) => ({
-                time: time as Time,
-                value
-            }));
-            uniqueLineData.sort((a, b) => (a.time as number) - (b.time as number));
+            const uniqueLineData: LineData[] = Array.from(timeMap.entries())
+                .map(([time, value]) => ({
+                    time: time as Time,
+                    value: Math.round(value * 100) / 100
+                }))
+                .sort((a, b) => (a.time as number) - (b.time as number));
             
-            lineSeriesRef.current.setData(uniqueLineData);
-            lastKnownPrice = uniqueLineData[uniqueLineData.length - 1];
+            if (uniqueLineData.length > 0) {
+                lineSeriesRef.current.setData(uniqueLineData);
+                lastKnownPrice = uniqueLineData[uniqueLineData.length - 1];
+            }
         }
         
         if (predSeriesRef.current && predictions && predictions.length > 0 && lastKnownPrice) {
@@ -107,16 +112,16 @@ export function CryptoChart({
             let currTime = lastKnownPrice.time as number;
             
             predictions.forEach((p, idx) => {
-                // Map future steps to future days so they scale proportionally on the Daily chart
-                const fTime = Math.floor(currTime + (idx + 1) * 86400);
+                // Project future prediction steps in 2-second multiples (+2s, +4s, +6s, +8s...)
+                const fTime = Math.floor(currTime + (idx + 1) * 2);
                 predData.push({
                     time: fTime as Time,
-                    value: p.price || p.predicted_price || p.value
+                    value: Math.round((p.price || p.predicted_price || p.value || 0) * 100) / 100
                 });
             });
             
-            const uniquePredData = Array.from(new Map(predData.map(item => [item.time, item])).values());
-            uniquePredData.sort((a, b) => (a.time as number) - (b.time as number));
+            const uniquePredData = Array.from(new Map(predData.map(item => [item.time, item])).values())
+                .sort((a, b) => (a.time as number) - (b.time as number));
             
             predSeriesRef.current.setData(uniquePredData);
         }
