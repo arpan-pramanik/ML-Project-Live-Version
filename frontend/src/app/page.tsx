@@ -368,7 +368,8 @@ export default function ControlPanel() {
 
   // Price Stream & Future Trajectory Calculations
   const priceStream = telemetry?.price_stream;
-  const recentPrices = priceStream?.recent_prices || [];
+  // Ignore past trades for this specific SVG chart; we only want to map the future prediction horizon.
+  const recentPrices: any[] = [];
   const futureSteps = priceStream?.predicted_future || [];
   const currentPrice = priceStream?.current_price || (telemetry?.live_stream_status?.latest_price || 0);
 
@@ -728,15 +729,12 @@ export default function ControlPanel() {
               </span>
             </div>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Solid blue line shows real-time historical trades; dashed amber line displays the model&apos;s forward predicted price path.
+              Dashed amber line exclusively displays the model&apos;s forward predicted price path (T+1 to T+8).
             </p>
           </div>
 
           {/* Visual Legend */}
           <div className="flex items-center gap-4 text-xs font-medium">
-            <span className="flex items-center gap-1.5 text-blue-700 font-semibold">
-              <span className="w-3.5 h-0.5 bg-blue-700" /> Live Trades (Actual)
-            </span>
             <span className="flex items-center gap-1.5 text-amber-600 font-semibold">
               <span className="w-3.5 h-0.5 bg-amber-500" /> Model Forecast (Future)
             </span>
@@ -775,13 +773,10 @@ export default function ControlPanel() {
               strokeWidth="1.5"
               strokeDasharray="4,3"
             />
-            <text x={boundaryX - 16} y={priceSvgHeight - 10} fontSize="10" fill="#475569" fontWeight="bold" fontFamily="monospace">
-              NOW
+            <text x={boundaryX + 10} y={priceSvgHeight - 10} fontSize="10" fill="#475569" fontWeight="bold" fontFamily="monospace">
+              NOW (SPOT PRICE)
             </text>
-            <text x={pPadLeft + 10} y={priceSvgHeight - 10} fontSize="9" fill="#64748b" fontFamily="monospace">
-              ← PAST TRADES
-            </text>
-            <text x={boundaryX + 10} y={priceSvgHeight - 10} fontSize="9" fill="#d97706" fontWeight="bold" fontFamily="monospace">
+            <text x={boundaryX + 150} y={priceSvgHeight - 10} fontSize="9" fill="#d97706" fontWeight="bold" fontFamily="monospace">
               PREDICTED HORIZON (T+1 .. T+8) →
             </text>
 
