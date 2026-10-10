@@ -474,7 +474,7 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
                 "target_delta_pct": future_steps[-1]["delta_pct"] if future_steps else 0.0,
                 "recent_prices": [
                     {"price": round(p["price"], 2), "timestamp": p["timestamp"], "time_str": p.get("time_str", "")}
-                    for p in recent_p[-30:]
+                    for p in recent_p
                 ] if recent_p else [{"price": round(price, 2), "timestamp": time.time(), "time_str": time.strftime("%H:%M:%S")}],
                 "predicted_future": future_steps,
                 "volatility": round(vol * 1000, 2),
@@ -887,6 +887,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
                 model_key = str(payload.get("model", "proposed")).lower()
                 detector_name = str(payload.get("detector", "adwin")).lower()
+                dataset_key = str(payload.get("dataset", "coinbase_btc")).lower()
 
                 if dataset_key not in VALID_DATASETS:
                     self._send_json({"status": "error", "message": f"Unknown dataset key: {dataset_key}"}, status=400)
