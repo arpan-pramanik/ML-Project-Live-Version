@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import dynamic from "next/dynamic";
+
+const CryptoChart = dynamic(
+  () => import("../components/CryptoChart").then(mod => mod.CryptoChart),
+  { ssr: false }
+);
 
 interface HardwareInfo {
   cpu: {
@@ -909,6 +915,38 @@ export default function ControlPanel() {
             </div>
             <div className="text-[10px] text-slate-500">Rolling Variance Scale</div>
           </div>
+        </div>
+      </section>
+
+      {/* 5.5 Advanced Interactive Financial Chart (TradingView) */}
+      <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-200 pb-3 mb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                ADVANCED INTERACTIVE CHART (TRADINGVIEW)
+              </h2>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Fully interactive financial stock graph featuring panning, zooming, crosshairs, and price scales. 
+              Plots the deep historical streaming price paired with the AI-driven predicted horizon (T+1 .. T+8).
+            </p>
+          </div>
+          <div className="flex items-center gap-4 text-xs font-medium">
+            <span className="flex items-center gap-1.5 text-blue-700 font-semibold">
+              <span className="w-3 h-0.5 bg-blue-700"></span> Live Spot Price
+            </span>
+            <span className="flex items-center gap-1.5 text-amber-700 font-semibold">
+              <span className="w-3 h-0.5 border-t border-dashed border-amber-600"></span> Predicted Price (T+8)
+            </span>
+          </div>
+        </div>
+
+        <div className="w-full">
+          <CryptoChart 
+            prices={priceStream?.recent_prices || []} 
+            predictions={priceStream?.predicted_future || []} 
+          />
         </div>
       </section>
 
