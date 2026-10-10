@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
-import { createChart, ColorType, ISeriesApi, LineData, Time, CrosshairMode } from 'lightweight-charts';
+import { createChart, ColorType, ISeriesApi, LineData, Time, CrosshairMode, LineSeries } from 'lightweight-charts';
 
 export function CryptoChart({ 
     prices, 
@@ -43,14 +43,14 @@ export function CryptoChart({
 
         chartRef.current = chart;
 
-        const lineSeries = chart.addLineSeries({
+        const lineSeries = chart.addSeries(LineSeries, {
             color: '#1d4ed8',
             lineWidth: 2,
             crosshairMarkerVisible: true,
         });
         lineSeriesRef.current = lineSeries;
 
-        const predSeries = chart.addLineSeries({
+        const predSeries = chart.addSeries(LineSeries, {
             color: '#d97706', // amber-600
             lineWidth: 2,
             lineStyle: 2, // Dashed
