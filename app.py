@@ -341,15 +341,23 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
         TELEMETRY.stage = "LIVE_WARMUP"
         TELEMETRY.log(f"Collecting market ticks (historical + live) from Coinbase to bootstrap streaming model...")
 
-        # We have up to 300 historical samples queued, pull 60 for initial model bootstrap
+        # Drain all queued historical samples for massive initial model bootstrap (2800+ samples)
+        while not stream.queue.empty() and not TELEMETRY.should_stop:
+            s = stream.get_sample(timeout=0.1)
+            if s is not None:
+                warmup_samples.append(s)
+                TELEMETRY.current_sample = len(warmup_samples)
+                
+        # If no historical data was queued, wait for at least some live samples
         while len(warmup_samples) < 60 and not TELEMETRY.should_stop:
             s = stream.get_sample(timeout=1.0)
             if s is not None:
                 warmup_samples.append(s)
                 TELEMETRY.current_sample = len(warmup_samples)
-                TELEMETRY.live_stream_status = stream.get_status()
-            if (time.time() - t0) > 25 and len(warmup_samples) >= 6:
+            if (time.time() - t0) > 15 and len(warmup_samples) >= 10:
                 break
+                
+        TELEMETRY.live_stream_status = stream.get_status()
 
         if TELEMETRY.should_stop or len(warmup_samples) == 0:
             stream.stop()

@@ -30,8 +30,6 @@ export function CryptoChart({
                 mode: CrosshairMode.Normal,
             },
             timeScale: {
-                timeVisible: true,
-                secondsVisible: false,
                 borderColor: '#e2e8f0',
             },
             rightPriceScale: {
