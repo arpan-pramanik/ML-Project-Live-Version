@@ -97,6 +97,7 @@ class TelemetryEngine:
             self.graph_memory: Dict[str, Any] = {}
             self.downstream: Dict[str, Any] = {}
             self.live_stream_status: Dict[str, Any] = {}
+            self.price_stream: Dict[str, Any] = {}
 
     def log(self, message: str, level: str = "INFO", details: Optional[Dict[str, Any]] = None):
         t_str = time.strftime("%H:%M:%S") + f".{int((time.time() % 1) * 1000):03d}"
@@ -137,6 +138,7 @@ class TelemetryEngine:
                 "graph_memory": self.graph_memory,
                 "downstream": self.downstream,
                 "live_stream_status": self.live_stream_status,
+                "price_stream": self.price_stream,
             }
 
 
@@ -443,6 +445,46 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
                 TELEMETRY.graph_memory = model.get_graph_state()
             if hasattr(model, "get_downstream_state"):
                 TELEMETRY.downstream = model.get_downstream_state()
+
+            # Compute forward predicted crypto price trajectory
+            conf_val = getattr(model, "predict_proba_one", lambda _: 0.5)(x_t)
+            if isinstance(conf_val, (list, tuple, np.ndarray)):
+                conf_val = float(conf_val[1] if len(conf_val) > 1 else conf_val[0])
+            else:
+                conf_val = float(conf_val)
+            conf_norm = conf_val if pred == 1 else (1.0 - conf_val)
+
+            vol = float(meta.get("volatility", 0.0003))
+            vol = max(0.0002, min(0.008, vol))
+            direction_sign = 1.0 if pred == 1 else -1.0
+            future_steps = []
+            for s_idx in range(1, 9):
+                drift_delta = direction_sign * (vol * np.sqrt(s_idx)) * max(0.5, conf_norm)
+                future_p = round(price * (1.0 + drift_delta), 2)
+                future_steps.append({
+                    "step": s_idx,
+                    "price": future_p,
+                    "delta": round(future_p - price, 2),
+                    "delta_pct": round(drift_delta * 100, 3),
+                })
+
+            recent_p = stream.get_recent_prices() if hasattr(stream, "get_recent_prices") else []
+            TELEMETRY.price_stream = {
+                "product_id": product,
+                "current_price": round(price, 2),
+                "direction": "UP" if pred == 1 else "DOWN",
+                "confidence": round(conf_norm * 100, 1),
+                "target_price": future_steps[-1]["price"] if future_steps else price,
+                "target_delta": future_steps[-1]["delta"] if future_steps else 0.0,
+                "target_delta_pct": future_steps[-1]["delta_pct"] if future_steps else 0.0,
+                "recent_prices": [
+                    {"price": round(p["price"], 2), "timestamp": p["timestamp"], "time_str": p.get("time_str", "")}
+                    for p in recent_p[-30:]
+                ] if recent_p else [{"price": round(price, 2), "timestamp": time.time(), "time_str": time.strftime("%H:%M:%S")}],
+                "predicted_future": future_steps,
+                "volatility": round(vol * 1000, 2),
+                "timestamp": time.time(),
+            }
 
             acc = correct / total_streamed
             w_acc = np.mean(rolling_correct) if rolling_correct else acc
@@ -809,6 +851,8 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             self._send_json(TELEMETRY.downstream)
         elif path == "/api/coinbase/status":
             self._send_json(TELEMETRY.live_stream_status)
+        elif path == "/api/price_stream":
+            self._send_json(TELEMETRY.price_stream)
         elif path == "/api/datasets":
             datasets_list = [
                 {"id": "coinbase_btc", "name": "🔴 LIVE FEED: Coinbase BTC/USD WebSocket", "features": 9, "type": "Live Exchange Stream"},

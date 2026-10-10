@@ -43,6 +43,7 @@ class CoinbaseLiveStream:
         self.volumes = collections.deque(maxlen=window_size)
         self.timestamps = collections.deque(maxlen=window_size)
         self.sides = collections.deque(maxlen=window_size)  # 1 for buy, -1 for sell
+        self.price_history = collections.deque(maxlen=60)
 
         # Pending prediction queue for prequential ground-truth label assignment
         # Stores (sample_id, features, current_price, timestamp, metadata)
@@ -151,6 +152,12 @@ class CoinbaseLiveStream:
         self.volumes.append(volume)
         self.timestamps.append(now)
         self.sides.append(side)
+        self.price_history.append({
+            "price": price,
+            "volume": volume,
+            "timestamp": now,
+            "time_str": time.strftime("%H:%M:%S", time.localtime(now)),
+        })
 
         # 1. Resolve pending samples whose prediction horizon has elapsed
         self._resolve_pending_samples(price)
@@ -296,3 +303,7 @@ class CoinbaseLiveStream:
             "tick_rate": round(self.tick_count / max(0.1, elapsed), 1) if elapsed > 0 else 0.0,
             "elapsed_seconds": round(elapsed, 1),
         }
+
+    def get_recent_prices(self) -> List[Dict[str, Any]]:
+        """Get recent real-time trade price points for UI plotting."""
+        return list(self.price_history)
