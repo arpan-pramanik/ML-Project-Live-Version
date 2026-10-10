@@ -79,12 +79,20 @@ export function CryptoChart({
         let lastKnownPrice: any = null;
 
         if (lineSeriesRef.current && prices && prices.length > 0) {
-            const lineData: LineData[] = prices.map(p => ({
-                time: Math.floor(p.timestamp) as Time,
-                value: p.price
+            // Group all points by Day (86400 seconds) to create a pure Daily timeframe chart.
+            // This prevents live 1-second ticks from visually stretching out as a flat line 
+            // when plotted alongside 7 years of 1-day historical candles.
+            const dailyMap = new Map<number, number>();
+            prices.forEach(p => {
+                const dayTime = Math.floor(p.timestamp / 86400) * 86400;
+                // Latest price overwrites previous prices for that day (acts as the live daily close)
+                dailyMap.set(dayTime, p.price);
+            });
+            
+            const uniqueLineData: LineData[] = Array.from(dailyMap.entries()).map(([time, value]) => ({
+                time: time as Time,
+                value
             }));
-            // Ensure strictly ascending and unique timestamps
-            const uniqueLineData = Array.from(new Map(lineData.map(item => [item.time, item])).values());
             uniqueLineData.sort((a, b) => (a.time as number) - (b.time as number));
             
             lineSeriesRef.current.setData(uniqueLineData);
@@ -99,10 +107,11 @@ export function CryptoChart({
             let currTime = lastKnownPrice.time as number;
             
             predictions.forEach((p, idx) => {
-                const fTime = Math.floor(currTime + (idx + 1) * 60);
+                // Map future steps to future days so they scale proportionally on the Daily chart
+                const fTime = Math.floor(currTime + (idx + 1) * 86400);
                 predData.push({
                     time: fTime as Time,
-                    value: p.price
+                    value: p.price || p.predicted_price || p.value
                 });
             });
             
