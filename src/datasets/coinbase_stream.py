@@ -78,6 +78,36 @@ class CoinbaseLiveStream:
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=2.0)
 
+    def load_historical_data(self, limit: int = 300):
+        """Pretrain on historical data up to today (Oct 10 2026) using REST API."""
+        import requests
+        print(f"[CoinbaseStream] Pre-training on historical data for {self.product_id} (up to {limit} minutes)...")
+        try:
+            # 60s granularity, returns up to 300 recent candles
+            res = requests.get(f"https://api.exchange.coinbase.com/products/{self.product_id}/candles?granularity=60")
+            if res.status_code == 200:
+                data = res.json()
+                # data is [ [time, low, high, open, close, volume], ... ]
+                # sorted descending by time, so we reverse it to process chronologically
+                candles = list(reversed(data[:limit]))
+                for candle in candles:
+                    ts = float(candle[0])
+                    close_p = float(candle[4])
+                    vol = float(candle[5])
+                    
+                    # Construct a synthetic tick
+                    msg = {
+                        "type": "ticker",
+                        "price": close_p,
+                        "size": vol,
+                        "side": "buy" if np.random.random() > 0.5 else "sell",
+                        "timestamp": ts,
+                    }
+                    self._handle_message(msg)
+                print(f"[CoinbaseStream] Preloaded {len(candles)} historical candles for pretraining.")
+        except Exception as e:
+            print(f"[CoinbaseStream] Failed to load historical data: {e}")
+
     def _run_async_loop(self):
         """Background thread running asyncio event loop."""
         loop = asyncio.new_event_loop()
@@ -139,7 +169,23 @@ class CoinbaseLiveStream:
             volume = float(size_val)
             side_str = data.get("side", "buy").lower()
             side = 1.0 if side_str == "buy" else -1.0
-            now = time.time()
+            
+            # Use explicit timestamp if provided (for historical pretraining), else current time
+            provided_ts = data.get("timestamp")
+            if provided_ts is not None:
+                now = float(provided_ts)
+            else:
+                time_str = data.get("time")
+                if time_str and isinstance(time_str, str) and time_str.endswith("Z"):
+                    # Basic ISO 8601 parser for Coinbase live WS 'time' field
+                    import datetime
+                    try:
+                        dt = datetime.datetime.strptime(time_str[:19], "%Y-%m-%dT%H:%M:%S")
+                        now = dt.replace(tzinfo=datetime.timezone.utc).timestamp()
+                    except ValueError:
+                        now = time.time()
+                else:
+                    now = time.time()
         except (ValueError, TypeError):
             return
 

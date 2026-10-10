@@ -338,6 +338,10 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
     TELEMETRY.log(f"Connecting to live Coinbase WebSocket stream for {product}...")
 
     stream = CoinbaseLiveStream(product_id=product, window_size=30, prediction_horizon=2)
+    
+    TELEMETRY.log(f"Pre-training streaming model on historical 1-minute candles up to {time.strftime('%b %d %Y')} to bootstrap concept graph...")
+    stream.load_historical_data(limit=300)
+    
     stream.start()
 
     try:
@@ -345,9 +349,10 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
         warmup_samples = []
         t0 = time.time()
         TELEMETRY.stage = "LIVE_WARMUP"
-        TELEMETRY.log(f"Collecting live market ticks from Coinbase to bootstrap streaming model...")
+        TELEMETRY.log(f"Collecting market ticks (historical + live) from Coinbase to bootstrap streaming model...")
 
-        while len(warmup_samples) < 15 and not TELEMETRY.should_stop:
+        # We have up to 300 historical samples queued, pull 60 for initial model bootstrap
+        while len(warmup_samples) < 60 and not TELEMETRY.should_stop:
             s = stream.get_sample(timeout=1.0)
             if s is not None:
                 warmup_samples.append(s)
