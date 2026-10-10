@@ -141,7 +141,9 @@ interface PricePoint {
 }
 
 interface FutureStep {
-  step: number;
+  step: string | number;
+  step_num?: number;
+  minute?: number;
   price: number;
   delta: number;
   delta_pct: number;
@@ -155,6 +157,9 @@ interface PriceStreamData {
   target_price: number;
   target_delta: number;
   target_delta_pct: number;
+  next_day_price?: number;
+  next_day_delta?: number;
+  next_day_delta_pct?: number;
   recent_prices: PricePoint[];
   predicted_future: FutureStep[];
   volatility: number;
@@ -740,30 +745,30 @@ export default function ControlPanel() {
         </div>
       </section>
 
-      {/* 5. Live Crypto Price Chart with Future Predicted Trajectory */}
+      {/* 5. Live Crypto Price Chart with Next-Minute Predicted Trajectory */}
       <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-200 pb-3 mb-3">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                LIVE MARKET STREAM & FORWARD PREDICTION TRAJECTORY
+                LIVE MARKET STREAM & FORWARD PREDICTION TRAJECTORY (NEXT-MINUTE HORIZON)
               </h2>
               <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold">
-                REAL-TIME INFERENCE
+                1m – 8m HORIZON
               </span>
             </div>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Dashed amber line exclusively displays the model&apos;s forward predicted price path (T+1 to T+8).
+              Dashed amber line exclusively displays the model&apos;s forward predicted price path for the next minutes (T+1 min to T+8 min).
             </p>
           </div>
 
           {/* Visual Legend */}
           <div className="flex items-center gap-4 text-xs font-medium">
             <span className="flex items-center gap-1.5 text-amber-600 font-semibold">
-              <span className="w-3.5 h-0.5 bg-amber-500" /> Model Forecast (Future)
+              <span className="w-3.5 h-0.5 bg-amber-500" /> Next-Minute Forecast (T+1m .. T+8m)
             </span>
             <span className="flex items-center gap-1.5 text-slate-500">
-              <span className="w-3 h-0.5 border-t border-dashed border-slate-400" /> Now (T₀)
+              <span className="w-3 h-0.5 border-t border-dashed border-slate-400" /> Spot (T₀)
             </span>
           </div>
         </div>
@@ -801,7 +806,7 @@ export default function ControlPanel() {
               NOW (SPOT PRICE)
             </text>
             <text x={boundaryX + 150} y={priceSvgHeight - 10} fontSize="9" fill="#d97706" fontWeight="bold" fontFamily="monospace">
-              PREDICTED HORIZON (T+1 .. T+8) →
+              PREDICTED NEXT-MINUTE HORIZON (T+1m .. T+8m) →
             </text>
 
             {/* Historical Real-Time Price Line (Solid Blue) */}
@@ -896,7 +901,7 @@ export default function ControlPanel() {
           </div>
 
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-            <div className="text-[10px] font-semibold text-slate-500 uppercase">FORECAST TARGET (T+8)</div>
+            <div className="text-[10px] font-semibold text-slate-500 uppercase">NEXT-MINUTE TARGET (T+1m)</div>
             <div className="text-lg font-bold text-amber-700 mt-0.5 font-mono">
               ${(priceStream?.target_price || currentPrice).toLocaleString(undefined, {
                 minimumFractionDigits: 2,
@@ -912,16 +917,18 @@ export default function ControlPanel() {
           </div>
 
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-            <div className="text-[10px] font-semibold text-slate-500 uppercase">MODEL SIGNAL & CONFIDENCE</div>
-            <div className="text-base font-bold text-slate-900 mt-0.5">
-              {priceStream?.direction === "UP" ? (
-                <span className="text-blue-700">▲ UPWARD TREND</span>
-              ) : (
-                <span className="text-rose-600">▼ DOWNWARD TREND</span>
-              )}
+            <div className="text-[10px] font-semibold text-slate-500 uppercase">NEXT-DAY TARGET (TOMORROW)</div>
+            <div className="text-lg font-bold text-slate-900 mt-0.5 font-mono">
+              ${(priceStream?.next_day_price || currentPrice).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </div>
-            <div className="text-[10px] text-slate-600 font-mono">
-              Confidence: {priceStream?.confidence || 50}%
+            <div className="text-[10px] font-semibold text-slate-700 font-mono">
+              {(priceStream?.next_day_delta || 0) >= 0 ? "+" : ""}
+              {(priceStream?.next_day_delta || 0).toFixed(2)} (
+              {(priceStream?.next_day_delta_pct || 0) >= 0 ? "+" : ""}
+              {(priceStream?.next_day_delta_pct || 0).toFixed(2)}%)
             </div>
           </div>
 
@@ -935,26 +942,25 @@ export default function ControlPanel() {
         </div>
       </section>
 
-      {/* 5.5 Advanced Interactive Financial Chart (TradingView) */}
+      {/* 5.5 Advanced Interactive Financial Chart (TradingView) - Daily Scale */}
       <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-200 pb-3 mb-4">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                ADVANCED INTERACTIVE CHART (TRADINGVIEW)
+                ADVANCED INTERACTIVE CHART (TRADINGVIEW) — DAILY TIMEFRAME
               </h2>
             </div>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Fully interactive financial stock graph featuring panning, zooming, crosshairs, and price scales. 
-              Plots the deep historical streaming price paired with the AI-driven predicted horizon (T+1 .. T+8).
+              Pure daily stock chart from 2019 to Present. Plots deep historical price candles paired with the model&apos;s forecasted Next-Day price target.
             </p>
           </div>
           <div className="flex items-center gap-4 text-xs font-medium">
             <span className="flex items-center gap-1.5 text-blue-700 font-semibold">
-              <span className="w-3 h-0.5 bg-blue-700"></span> Live Spot Price
+              <span className="w-3 h-0.5 bg-blue-700"></span> Live Spot Price (Daily)
             </span>
             <span className="flex items-center gap-1.5 text-amber-700 font-semibold">
-              <span className="w-3 h-0.5 border-t border-dashed border-amber-600"></span> Predicted Price (T+8)
+              <span className="w-3 h-0.5 border-t border-dashed border-amber-600"></span> Next-Day Forecast (Tomorrow)
             </span>
           </div>
         </div>
@@ -963,6 +969,7 @@ export default function ControlPanel() {
           <CryptoChart 
             prices={priceStream?.recent_prices || []} 
             predictions={priceStream?.predicted_future || []} 
+            nextDayPrice={priceStream?.next_day_price}
           />
         </div>
       </section>

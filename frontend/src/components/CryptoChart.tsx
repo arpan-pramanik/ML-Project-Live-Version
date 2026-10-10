@@ -1,13 +1,15 @@
 "use client";
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { createChart, ColorType, ISeriesApi, LineData, Time, CrosshairMode, LineSeries } from 'lightweight-charts';
 
 export function CryptoChart({ 
     prices, 
-    predictions 
+    predictions,
+    nextDayPrice,
 }: { 
-    prices: any[], 
-    predictions: any[] 
+    prices: any[]; 
+    predictions?: any[];
+    nextDayPrice?: number;
 }) {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<any>(null);
@@ -17,6 +19,7 @@ export function CryptoChart({
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
+        // TradingView chart sticks strictly to Daily resolution (no time/seconds)
         const chart = createChart(chartContainerRef.current, {
             layout: {
                 background: { type: ColorType.Solid, color: '#ffffff' },
@@ -31,8 +34,6 @@ export function CryptoChart({
             },
             timeScale: {
                 borderColor: '#e2e8f0',
-                timeVisible: true,
-                secondsVisible: true,
             },
             rightPriceScale: {
                 borderColor: '#e2e8f0',
@@ -81,17 +82,15 @@ export function CryptoChart({
         let lastKnownPrice: any = null;
 
         if (lineSeriesRef.current && prices && prices.length > 0) {
-            // Quantize timestamps to 2-second multiples as requested.
-            // Preserves historical daily candles while allowing granular zoom down to seconds (:02, :04, :06) on live data.
-            const timeMap = new Map<number, number>();
+            // Group all historical & live points strictly by Day (86400s) to keep TradingView on pure Daily scale
+            const dailyMap = new Map<number, number>();
             prices.forEach(p => {
                 if (!p || typeof p.price !== 'number' || typeof p.timestamp !== 'number') return;
-                // Quantize to 2-second multiple (even integer seconds)
-                const t2s = Math.floor(p.timestamp / 2) * 2;
-                timeMap.set(t2s, p.price);
+                const dayTime = Math.floor(p.timestamp / 86400) * 86400;
+                dailyMap.set(dayTime, p.price);
             });
             
-            const uniqueLineData: LineData[] = Array.from(timeMap.entries())
+            const uniqueLineData: LineData[] = Array.from(dailyMap.entries())
                 .map(([time, value]) => ({
                     time: time as Time,
                     value: Math.round(value * 100) / 100
@@ -104,28 +103,19 @@ export function CryptoChart({
             }
         }
         
-        if (predSeriesRef.current && predictions && predictions.length > 0 && lastKnownPrice) {
+        // Show next-day prediction on the daily TradingView chart
+        if (predSeriesRef.current && lastKnownPrice) {
+            const nextDayTime = (lastKnownPrice.time as number) + 86400;
+            const targetP = nextDayPrice || (predictions && predictions.length > 0 ? (predictions[0].price || predictions[0].value) : lastKnownPrice.value);
+            
             const predData: LineData[] = [
-                { time: lastKnownPrice.time, value: lastKnownPrice.value }
+                { time: lastKnownPrice.time, value: lastKnownPrice.value },
+                { time: nextDayTime as Time, value: Math.round(targetP * 100) / 100 }
             ];
             
-            let currTime = lastKnownPrice.time as number;
-            
-            predictions.forEach((p, idx) => {
-                // Project future prediction steps in 2-second multiples (+2s, +4s, +6s, +8s...)
-                const fTime = Math.floor(currTime + (idx + 1) * 2);
-                predData.push({
-                    time: fTime as Time,
-                    value: Math.round((p.price || p.predicted_price || p.value || 0) * 100) / 100
-                });
-            });
-            
-            const uniquePredData = Array.from(new Map(predData.map(item => [item.time, item])).values())
-                .sort((a, b) => (a.time as number) - (b.time as number));
-            
-            predSeriesRef.current.setData(uniquePredData);
+            predSeriesRef.current.setData(predData);
         }
-    }, [prices, predictions]);
+    }, [prices, predictions, nextDayPrice]);
 
     return (
         <div ref={chartContainerRef} style={{ width: '100%', height: '450px' }} className="rounded-lg overflow-hidden border border-slate-200" />

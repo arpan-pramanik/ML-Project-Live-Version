@@ -583,16 +583,24 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
             vol = float(meta.get("volatility", 0.0003))
             vol = max(0.0002, min(0.008, vol))
             direction_sign = 1.0 if pred == 1 else -1.0
+
+            # 1. Next-Minute Prediction Trajectory (T+1m to T+8m micro-horizon for trajectory chart)
             future_steps = []
-            for s_idx in range(1, 9):
-                drift_delta = direction_sign * (vol * 0.15 * np.sqrt(s_idx)) * max(0.5, conf_norm)
-                future_p = round(price * (1.0 + drift_delta), 2)
+            for m_idx in range(1, 9):
+                drift_m = direction_sign * (vol * np.sqrt(m_idx)) * max(0.5, conf_norm)
+                m_price = round(price * (1.0 + drift_m), 2)
                 future_steps.append({
-                    "step": s_idx,
-                    "price": future_p,
-                    "delta": round(future_p - price, 2),
-                    "delta_pct": round(drift_delta * 100, 3),
+                    "step": f"T+{m_idx}m",
+                    "step_num": m_idx,
+                    "price": m_price,
+                    "delta": round(m_price - price, 2),
+                    "delta_pct": round(drift_m * 100, 3),
                 })
+
+            # 2. Next-Day Prediction (24h macro-horizon for TradingView daily chart)
+            daily_vol = max(0.012, min(0.045, vol * 28.0))
+            day_drift = direction_sign * daily_vol * max(0.6, conf_norm)
+            next_day_price = round(price * (1.0 + day_drift), 2)
 
             recent_p = stream.get_recent_prices() if hasattr(stream, "get_recent_prices") else []
             TELEMETRY.price_stream = {
@@ -600,9 +608,12 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
                 "current_price": round(price, 2),
                 "direction": "UP" if pred == 1 else "DOWN",
                 "confidence": round(conf_norm * 100, 1),
-                "target_price": future_steps[-1]["price"] if future_steps else price,
-                "target_delta": future_steps[-1]["delta"] if future_steps else 0.0,
-                "target_delta_pct": future_steps[-1]["delta_pct"] if future_steps else 0.0,
+                "target_price": future_steps[0]["price"] if future_steps else price,  # Next minute target
+                "target_delta": future_steps[0]["delta"] if future_steps else 0.0,
+                "target_delta_pct": future_steps[0]["delta_pct"] if future_steps else 0.0,
+                "next_day_price": next_day_price,
+                "next_day_delta": round(next_day_price - price, 2),
+                "next_day_delta_pct": round(day_drift * 100, 2),
                 "recent_prices": [
                     {"price": round(p["price"], 2), "timestamp": p["timestamp"], "time_str": p.get("time_str", "")}
                     for p in recent_p
