@@ -15,5 +15,8 @@ venv
 .cache/
 .atreus.pids
 data/custom_stream.csv
+data/session_*.csv
+data/local_stream_record*.csv
 *.pem
 *.key
+

@@ -33,6 +33,10 @@ class CoinbaseLiveStream:
         self.prediction_horizon = prediction_horizon
         self.price_change_threshold = price_change_threshold
 
+        prod_slug = self.product_id.lower().replace("-", "_")
+        self.session_file = f"data/session_{prod_slug}.csv"
+        self.history_file = f"data/history_{prod_slug}_2019_2026.csv"
+
         self.queue: queue.Queue = queue.Queue(maxsize=10000)
         self.running = False
         self.connected = False
