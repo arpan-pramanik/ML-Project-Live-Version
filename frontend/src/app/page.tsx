@@ -216,15 +216,12 @@ export default function ControlPanel() {
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetrySnapshot | null>(null);
   const [datasets, setDatasets] = useState<Array<{ id: string; name: string; type: string }>>([
-    { id: "coinbase_btc", name: "Coinbase BTC/USD Live Feed", type: "Real-Time Exchange Data" },
-    { id: "coinbase_eth", name: "Coinbase ETH/USD Live Feed", type: "Real-Time Exchange Data" },
-    { id: "electricity", name: "NSW Electricity Market", type: "Real Recurring Concept" },
-    { id: "covertype", name: "Forest Covertype", type: "Real Multi-Class Shift" },
-    { id: "airlines", name: "Airlines Flight Delay", type: "Real Distribution Drift" },
+    { id: "coinbase_btc", name: "Coinbase BTC/USD Live Stream", type: "Real-Time Exchange Data (2019–2026)" },
+    { id: "coinbase_eth", name: "Coinbase ETH/USD Live Stream", type: "Real-Time Exchange Data (2019–2026)" },
   ]);
 
   const [selectedDataset, setSelectedDataset] = useState("coinbase_btc");
-  const [selectedModel, setSelectedModel] = useState("graph_memory_adaptive");
+  const [selectedModel, setSelectedModel] = useState("xgboost_cuda");
   const [selectedDetector, setSelectedDetector] = useState("adwin");
   const [warmup, setWarmup] = useState(20);
   const [windowSize, setWindowSize] = useState(50);
@@ -631,11 +628,14 @@ export default function ControlPanel() {
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
               >
-                <option value="graph_memory_adaptive">
-                  Graph Memory Concept Topology Adaptive Model (0ms Recall)
+                <option value="xgboost_cuda">
+                  GPU-Accelerated Adaptive XGBoost (NVIDIA CUDA Engine)
                 </option>
                 <option value="drift_moe">
                   DriftMoE (2026 Mixture of Experts + CUDA)
+                </option>
+                <option value="graph_memory_adaptive">
+                  Graph Memory Concept Topology Adaptive Model (0ms Recall)
                 </option>
                 <option value="proposed">
                   Proposed Selective Adapt (RF + SVM + Online Scaler)
@@ -643,8 +643,8 @@ export default function ControlPanel() {
                 <option value="boosted_forest">
                   Boosted ARF-DWM Forest (Shadow Trees)
                 </option>
-                <option value="full_retrain">Full Retraining (Baseline)</option>
-                <option value="static">Static Streaming Model (No Adapt)</option>
+                <option value="full_retrain">Full Retraining (Baseline Drift Evaluation)</option>
+                <option value="static">Static Streaming Model (No Adaptation Baseline)</option>
               </select>
             </div>
 

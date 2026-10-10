@@ -80,24 +80,99 @@ class CoinbaseLiveStream:
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=2.0)
 
-    def load_historical_data(self, full_history: bool = False):
-        """Pretrain on historical data (either recent 300 minutes or deep history from 2019) using REST API."""
+    def load_historical_data(self, full_history: bool = True):
+        """Pretrain on deep historical data from 2019 to today using product-specific files and Coinbase REST API."""
         import requests
         import datetime
         import time
         import os
-        
-        # Session Persistence: If we have a local record, replay it to restore state and preserve offline gaps
-        if os.path.exists("data/local_stream_record.csv"):
-            print(f"[CoinbaseStream] Restoring session from local record (preserving offline timeline gap)...")
+        import csv
+
+        prod_slug = self.product_id.lower().replace("-", "_")
+        hist_file = f"data/history_{prod_slug}_2019_2026.csv"
+        session_file = f"data/session_{prod_slug}.csv"
+
+        candles = []
+
+        # 1. Load full 2019-2026 historical candles (from disk cache if available, else fetch from Coinbase)
+        if full_history:
+            if os.path.exists(hist_file):
+                print(f"[CoinbaseStream] Loading verified 2019-2026 historical dataset for {self.product_id} from {hist_file}...")
+                try:
+                    with open(hist_file, "r") as f:
+                        reader = csv.reader(f)
+                        header = next(reader, None)
+                        for row in reader:
+                            if len(row) >= 6:
+                                # [time, low, high, open, close, volume]
+                                candles.append([float(row[0]), float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5])])
+                except Exception as e:
+                    print(f"[CoinbaseStream] Error reading historical cache: {e}")
+                    candles = []
+
+            if not candles:
+                print(f"[CoinbaseStream] Fetching deep historical candles for {self.product_id} from Coinbase REST API (2019 to today)...")
+                current_time = datetime.datetime(2019, 1, 1, tzinfo=datetime.timezone.utc)
+                end_time = datetime.datetime.now(datetime.timezone.utc)
+                all_candles = []
+
+                while current_time < end_time:
+                    next_time = min(current_time + datetime.timedelta(days=300), end_time)
+                    params = {
+                        "granularity": 86400,
+                        "start": current_time.isoformat(),
+                        "end": next_time.isoformat()
+                    }
+                    try:
+                        res = requests.get(f"https://api.exchange.coinbase.com/products/{self.product_id}/candles", params=params, timeout=10)
+                        if res.status_code == 200:
+                            data = res.json()
+                            if not data:
+                                break
+                            all_candles.extend(data)
+                        time.sleep(0.12)
+                    except Exception:
+                        break
+                    current_time = next_time
+
+                all_candles.sort(key=lambda x: x[0])
+                candles = all_candles
+
+                # Cache to disk for instant future loads
+                try:
+                    with open(hist_file, "w", newline="") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["time", "low", "high", "open", "close", "volume"])
+                        for c in candles:
+                            writer.writerow(c)
+                except Exception:
+                    pass
+
+        # Preload historical candles into stream pipeline
+        for candle in candles:
+            ts = float(candle[0])
+            close_p = float(candle[4])
+            vol = float(candle[5])
+            msg = {
+                "type": "ticker",
+                "price": close_p,
+                "size": vol,
+                "side": "buy" if np.random.random() > 0.5 else "sell",
+                "timestamp": ts,
+            }
+            self._handle_message(msg, is_historical=True)
+        print(f"[CoinbaseStream] Successfully preloaded {len(candles)} historical candles (2019–today) for {self.product_id}.")
+
+        # 2. Session Persistence: Replay any previous session ticks for this specific asset to preserve offline timeline gaps
+        if os.path.exists(session_file):
+            print(f"[CoinbaseStream] Restoring {self.product_id} session from {session_file} (preserving offline timeline gap)...")
             try:
                 count = 0
-                with open("data/local_stream_record.csv", "r") as f:
+                with open(session_file, "r") as f:
                     for line in f:
                         parts = line.strip().split(',')
                         if len(parts) == 4:
                             now, price, volume, side = parts
-                            # Push directly to state without writing back to CSV
                             self.prices.append(float(price))
                             self.volumes.append(float(volume))
                             self.timestamps.append(float(now))
@@ -117,71 +192,9 @@ class CoinbaseLiveStream:
                                     "timestamp": float(now), "meta": meta, "horizon_ticks": self.prediction_horizon,
                                 })
                             count += 1
-                print(f"[CoinbaseStream] Restored {count} ticks from local session record.")
-                return
+                print(f"[CoinbaseStream] Restored {count} offline ticks for {self.product_id}.")
             except Exception as e:
-                print(f"[CoinbaseStream] Failed to load local record: {e}")
-        
-        if full_history:
-            print(f"[CoinbaseStream] Pre-training on DEEP historical data for {self.product_id} from 2019 to today...")
-            # Fetch daily candles from 2019
-            current_time = datetime.datetime(2019, 1, 1, tzinfo=datetime.timezone.utc)
-            end_time = datetime.datetime.now(datetime.timezone.utc)
-            all_candles = []
-            
-            while current_time < end_time:
-                next_time = current_time + datetime.timedelta(days=300)
-                if next_time > end_time:
-                    next_time = end_time
-                    
-                params = {
-                    "granularity": 86400,
-                    "start": current_time.isoformat(),
-                    "end": next_time.isoformat()
-                }
-                try:
-                    res = requests.get(f"https://api.exchange.coinbase.com/products/{self.product_id}/candles", params=params)
-                    if res.status_code == 200:
-                        data = res.json()
-                        if not data:
-                            break
-                        all_candles.extend(data)
-                    time.sleep(0.15)
-                except Exception:
-                    break
-                current_time = next_time
-                
-            # Sort ascending by time
-            all_candles.sort(key=lambda x: x[0])
-            candles = all_candles
-        else:
-            print(f"[CoinbaseStream] Pre-training on recent historical data for {self.product_id} (up to 300 minutes)...")
-            try:
-                res = requests.get(f"https://api.exchange.coinbase.com/products/{self.product_id}/candles?granularity=60")
-                if res.status_code == 200:
-                    data = res.json()
-                    candles = list(reversed(data[:300]))
-                else:
-                    candles = []
-            except Exception:
-                candles = []
-                
-        try:
-            for candle in candles:
-                ts = float(candle[0])
-                close_p = float(candle[4])
-                vol = float(candle[5])
-                msg = {
-                    "type": "ticker",
-                    "price": close_p,
-                    "size": vol,
-                    "side": "buy" if np.random.random() > 0.5 else "sell",
-                    "timestamp": ts,
-                }
-                self._handle_message(msg)
-            print(f"[CoinbaseStream] Preloaded {len(candles)} historical candles for pretraining.")
-        except Exception as e:
-            print(f"[CoinbaseStream] Failed to load historical data: {e}")
+                print(f"[CoinbaseStream] Failed to load asset session record: {e}")
 
     def _run_async_loop(self):
         """Background thread running asyncio event loop."""
@@ -229,7 +242,7 @@ class CoinbaseLiveStream:
             finally:
                 self.connected = False
 
-    def _handle_message(self, data: Dict[str, Any]):
+    def _handle_message(self, data: Dict[str, Any], is_historical: bool = False):
         """Process incoming raw Coinbase WebSocket tick."""
         mtype = data.get("type")
         if mtype not in ("ticker", "match", "last_match"):
@@ -280,12 +293,14 @@ class CoinbaseLiveStream:
             "time_str": time.strftime("%H:%M:%S", time.localtime(now)),
         })
         
-        # Persist tick to local history file to remember session
-        try:
-            with open("data/local_stream_record.csv", "a") as f:
-                f.write(f"{now},{price},{volume},{side}\n")
-        except Exception:
-            pass
+        # Persist tick to product-specific session file to remember session across reboots
+        if not is_historical:
+            prod_slug = self.product_id.lower().replace("-", "_")
+            try:
+                with open(f"data/session_{prod_slug}.csv", "a") as f:
+                    f.write(f"{now},{price},{volume},{side}\n")
+            except Exception:
+                pass
 
         # 1. Resolve pending samples whose prediction horizon has elapsed
         self._resolve_pending_samples(price)

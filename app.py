@@ -1004,15 +1004,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             self._send_json(TELEMETRY.price_stream)
         elif path == "/api/datasets":
             datasets_list = [
-                {"id": "coinbase_btc", "name": "🔴 LIVE FEED: Coinbase BTC/USD WebSocket", "features": 9, "type": "Live Exchange Stream"},
-                {"id": "coinbase_eth", "name": "🔴 LIVE FEED: Coinbase ETH/USD WebSocket", "features": 9, "type": "Live Exchange Stream"},
-                {"id": "electricity", "name": "NSW Electricity Market (10k)", "features": 8, "type": "Real-World Recurring"},
-                {"id": "covertype", "name": "Forest Covertype Stream (10k)", "features": 54, "type": "Real-World Multi-Class"},
-                {"id": "airlines", "name": "Airlines Flight Delay Stream (2k)", "features": 7, "type": "Real-World Delay"},
-                {"id": "hf_credit", "name": "Hugging Face: Credit Default Risk (10k)", "features": 21, "type": "Hugging Face"},
+                {"id": "coinbase_btc", "name": "Coinbase BTC/USD Live Feed (2019–2026 Deep Dataset)", "features": 9, "type": "Live Exchange Stream"},
+                {"id": "coinbase_eth", "name": "Coinbase ETH/USD Live Feed (2019–2026 Deep Dataset)", "features": 9, "type": "Live Exchange Stream"},
             ]
-            if os.path.exists("data/custom_stream.csv"):
-                datasets_list.append({"id": "custom", "name": "Custom Added Dataset (data/custom_stream.csv)", "features": "Auto", "type": "User Added"})
             self._send_json({"datasets": datasets_list})
         else:
             self.send_error(404, "Path not found")
@@ -1039,7 +1033,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                     self._send_json({"status": "error", "message": "Pipeline already running"}, status=400)
                     return
 
-                model_key = str(payload.get("model", "proposed")).lower()
+                model_key = str(payload.get("model", "xgboost_cuda")).lower()
                 detector_name = str(payload.get("detector", "adwin")).lower()
                 dataset_key = str(payload.get("dataset", "coinbase_btc")).lower()
 
