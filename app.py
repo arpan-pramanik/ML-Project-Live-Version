@@ -503,6 +503,31 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
         TELEMETRY.stage = "LIVE_STREAMING"
         TELEMETRY.log(f"Live market streaming active on {product}! Ingesting real-time global trade ticks...")
 
+        # Derive stable Next-Day Macro Forecast from historical daily candle pattern (sits steady, doesn't flicker every 5s)
+        macro_next_day_price = None
+        if hasattr(stream, "historical_candles") and stream.historical_candles and len(stream.historical_candles) >= 14:
+            c_hist = [float(c["price"]) for c in stream.historical_candles[-30:]]
+            p_ref = c_hist[-1]
+            ema_7 = float(np.mean(c_hist[-7:]))
+            ema_21 = float(np.mean(c_hist[-21:])) if len(c_hist) >= 21 else ema_7
+            ema_trend = (ema_7 - ema_21) / max(1e-4, ema_21)
+
+            x_idx = np.arange(len(c_hist[-14:]))
+            slope, _ = np.polyfit(x_idx, np.array(c_hist[-14:]) / max(1e-4, p_ref), 1)
+            mom_5 = (c_hist[-1] - c_hist[-5]) / max(1e-4, c_hist[-5]) if len(c_hist) >= 5 else 0.0
+
+            daily_rets = np.diff(np.log(np.maximum(1e-4, c_hist[-21:]))) if len(c_hist) >= 22 else [0.015]
+            d_vol = float(np.std(daily_rets)) if len(daily_rets) > 1 else 0.018
+
+            pattern_score = float(
+                0.45 * np.sign(slope) * min(abs(slope) * 10, 1.0)
+                + 0.35 * np.sign(ema_trend) * min(abs(ema_trend) * 15, 1.0)
+                + 0.20 * np.sign(mom_5)
+            )
+            expected_macro_drift = pattern_score * max(0.010, min(0.035, d_vol * 1.2))
+            macro_next_day_price = round(p_ref * (1.0 + expected_macro_drift), 2)
+            TELEMETRY.log(f"Daily Pattern Analysis ({product}): EMA7 ${ema_7:,.2f} vs EMA21 ${ema_21:,.2f} | 24h Target locked at ${macro_next_day_price:,.2f} ({expected_macro_drift*100:+.2f}%)")
+
         pred_tracker = DelayedHorizonPredictionTracker(horizon_ticks=5, max_history=50)
         correct = 0
         total_streamed = 0
@@ -599,10 +624,13 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
                     "delta_pct": round(drift_s * 100, 3),
                 })
 
-            # 2. Next-Day Prediction (24h macro-horizon for TradingView daily chart)
-            daily_vol = max(0.012, min(0.045, vol * 28.0))
-            day_drift = direction_sign * daily_vol * max(0.6, conf_norm)
-            next_day_price = round(price * (1.0 + day_drift), 2)
+            # 2. Next-Day Macro Prediction (Derived from daily candle pattern; sits fixed, does not flip every 5s)
+            if macro_next_day_price is None:
+                macro_next_day_price = round(price * (1.0 + direction_sign * 0.015), 2)
+
+            next_day_price = macro_next_day_price
+            next_day_delta = round(next_day_price - price, 2)
+            next_day_delta_pct = round((next_day_price - price) / max(1e-4, price) * 100, 2)
 
             recent_p = stream.get_recent_prices() if hasattr(stream, "get_recent_prices") else []
             TELEMETRY.price_stream = {
@@ -614,8 +642,8 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
                 "target_delta": future_steps[0]["delta"] if future_steps else 0.0,
                 "target_delta_pct": future_steps[0]["delta_pct"] if future_steps else 0.0,
                 "next_day_price": next_day_price,
-                "next_day_delta": round(next_day_price - price, 2),
-                "next_day_delta_pct": round(day_drift * 100, 2),
+                "next_day_delta": next_day_delta,
+                "next_day_delta_pct": next_day_delta_pct,
                 "recent_prices": [
                     {"price": round(p["price"], 2), "timestamp": p["timestamp"], "time_str": p.get("time_str", "")}
                     for p in recent_p

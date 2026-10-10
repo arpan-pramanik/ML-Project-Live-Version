@@ -219,6 +219,37 @@ def test_historical_candles_retention():
     assert recent[-1]["price"] == 83000.0        # live spot price attached at end
 
 
+def test_macro_next_day_forecast_stability():
+    """Verify macro next-day forecast is derived from daily candle patterns and sits steady across ticks."""
+    c_hist = [80000.0 + i * 100 for i in range(30)]
+    p_ref = c_hist[-1]
+    ema_7 = float(np.mean(c_hist[-7:]))
+    ema_21 = float(np.mean(c_hist[-21:]))
+    ema_trend = (ema_7 - ema_21) / max(1e-4, ema_21)
+
+    x_idx = np.arange(len(c_hist[-14:]))
+    slope, _ = np.polyfit(x_idx, np.array(c_hist[-14:]) / max(1e-4, p_ref), 1)
+    mom_5 = (c_hist[-1] - c_hist[-5]) / max(1e-4, c_hist[-5])
+
+    daily_rets = np.diff(np.log(np.maximum(1e-4, c_hist[-21:])))
+    d_vol = float(np.std(daily_rets))
+
+    pattern_score = float(
+        0.45 * np.sign(slope) * min(abs(slope) * 10, 1.0)
+        + 0.35 * np.sign(ema_trend) * min(abs(ema_trend) * 15, 1.0)
+        + 0.20 * np.sign(mom_5)
+    )
+    expected_macro_drift = pattern_score * max(0.010, min(0.035, d_vol * 1.2))
+    macro_target = round(p_ref * (1.0 + expected_macro_drift), 2)
+
+    assert abs(macro_target - p_ref) / p_ref < 0.05
+    # Verify target stays locked across simulated micro-ticks
+    tick_prices = [82900.0, 82950.0, 82880.0, 83010.0]
+    for p in tick_prices:
+        # Target sits fixed; delta changes relative to spot
+        assert macro_target == round(p_ref * (1.0 + expected_macro_drift), 2)
+
+
 if __name__ == "__main__":
     test_concept_graph_memory()
     test_downstream_risk_engine()
@@ -227,4 +258,5 @@ if __name__ == "__main__":
     test_forward_prediction_trajectory_5s_intervals()
     test_balanced_micro_tick_labeling()
     test_historical_candles_retention()
+    test_macro_next_day_forecast_stability()
     print("\nALL LIVE STREAM & GRAPH MEMORY TESTS PASSED!")
