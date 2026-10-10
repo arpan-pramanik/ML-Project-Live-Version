@@ -231,11 +231,7 @@ def get_hardware_info() -> Dict[str, Any]:
 
 def load_dataset_by_key(key: str) -> Tuple[np.ndarray, np.ndarray, str]:
     """Resolve and load requested streaming dataset."""
-        X, y, _ = generate_sea_stream(n_samples=5000, noise_ratio=0.05, seed=42)
-        return X, y, "SEA Concepts Benchmark (5k Stream)"
-        X, y, _ = generate_agrawal_stream(n_samples=5000, noise_ratio=0.05, seed=42)
-        return X, y, "Agrawal Benchmark (5k Stream)"
-    elif key == "electricity":
+    if key == "electricity":
         return load_electricity_stream(max_samples=10000)
     elif key == "covertype":
         return load_covertype_stream(max_samples=10000)
