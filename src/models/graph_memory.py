@@ -45,8 +45,10 @@ class ConceptNode:
         self.variance = np.maximum(self.variance, 1e-4)
 
     def predict_proba(self, x: np.ndarray) -> float:
-        """Sigmoid probability prediction from localized expert."""
-        z = float(np.dot(self.weights, x) + self.bias)
+        """Sigmoid probability prediction from localized expert with standardized features."""
+        std = np.sqrt(np.maximum(1e-4, self.variance))
+        x_norm = (x - self.centroid) / std
+        z = float(np.dot(self.weights, x_norm) + self.bias)
         z = max(-15.0, min(15.0, z))
         return 1.0 / (1.0 + math.exp(-z))
 
@@ -54,10 +56,13 @@ class ConceptNode:
         return 1 if self.predict_proba(x) >= 0.5 else 0
 
     def train_sample(self, x: np.ndarray, y: int):
-        """Online SGD update for the localized expert."""
+        """Online SGD update for the localized expert with standardized features."""
+        self.update_distribution(x)
+        std = np.sqrt(np.maximum(1e-4, self.variance))
+        x_norm = (x - self.centroid) / std
         p = self.predict_proba(x)
         err = float(y) - p
-        self.weights += self.learning_rate * err * x
+        self.weights += self.learning_rate * err * x_norm
         self.bias += self.learning_rate * err
         if (1 if p >= 0.5 else 0) == y:
             self.correct_count += 1

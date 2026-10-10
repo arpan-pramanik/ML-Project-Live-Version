@@ -161,6 +161,29 @@ interface PriceStreamData {
   timestamp: number;
 }
 
+export interface PredictionMatch {
+  id: number;
+  time: string;
+  entry_price: number;
+  predicted_dir: "UP" | "DOWN";
+  target_price: number;
+  actual_price: number;
+  actual_dir: "UP" | "DOWN";
+  status: "HIT" | "MISS";
+  proximity_pct: number;
+  confidence: number;
+  price_diff: number;
+}
+
+export interface PredictionVerificationData {
+  total_verified: number;
+  correct_matches: number;
+  match_rate_pct: number;
+  avg_proximity_pct: number;
+  pending_count: number;
+  recent_matches: PredictionMatch[];
+}
+
 interface TelemetrySnapshot {
   running: boolean;
   dataset_name: string;
@@ -186,6 +209,7 @@ interface TelemetrySnapshot {
   downstream?: DownstreamState;
   live_stream_status?: LiveStreamStatus;
   price_stream?: PriceStreamData;
+  prediction_verification?: PredictionVerificationData;
 }
 
 export default function ControlPanel() {
@@ -940,6 +964,134 @@ export default function ControlPanel() {
             prices={priceStream?.recent_prices || []} 
             predictions={priceStream?.predicted_future || []} 
           />
+        </div>
+      </section>
+
+      {/* 5.6 Real-Time Prediction Horizon Verification (Predict -> Wait -> Match) */}
+      <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-200 pb-3 mb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                PREDICTION HORIZON VERIFICATION (PREDICT → WAIT → MATCH)
+              </h2>
+              <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold px-2 py-0.5 rounded">
+                TRUTH AUDIT
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Every forecast is queued, held for 5 market ticks, and rigorously matched against real trade execution. 
+              Eliminates hallucinations by verifying actual directional accuracy and target price closeness.
+            </p>
+          </div>
+          <div className="text-xs font-mono font-medium text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">
+            Active Pending Horizons: <span className="font-bold text-blue-700">{telemetry?.prediction_verification?.pending_count || 0}</span>
+          </div>
+        </div>
+
+        {/* 4 Summary Metric Tiles */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <div className="text-[10px] font-semibold text-slate-500 uppercase">HORIZON MATCH RATE</div>
+            <div className="text-xl font-bold text-blue-700 mt-0.5 font-mono">
+              {(telemetry?.prediction_verification?.match_rate_pct || 0).toFixed(1)}%
+            </div>
+            <div className="text-[10px] text-slate-500">Directional Accuracy</div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <div className="text-[10px] font-semibold text-slate-500 uppercase">TARGET PROXIMITY</div>
+            <div className="text-xl font-bold text-slate-900 mt-0.5 font-mono">
+              {(telemetry?.prediction_verification?.avg_proximity_pct || 0).toFixed(1)}%
+            </div>
+            <div className="text-[10px] text-slate-500">Price Target Closeness</div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <div className="text-[10px] font-semibold text-slate-500 uppercase">VERIFIED PREDICTIONS</div>
+            <div className="text-xl font-bold text-slate-900 mt-0.5 font-mono">
+              {telemetry?.prediction_verification?.total_verified || 0}
+            </div>
+            <div className="text-[10px] text-slate-500">
+              {telemetry?.prediction_verification?.correct_matches || 0} Hits / {((telemetry?.prediction_verification?.total_verified || 0) - (telemetry?.prediction_verification?.correct_matches || 0))} Misses
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <div className="text-[10px] font-semibold text-slate-500 uppercase">HORIZON DURATION</div>
+            <div className="text-xl font-bold text-slate-900 mt-0.5 font-mono">
+              5 TICKS
+            </div>
+            <div className="text-[10px] text-slate-500">Delay-to-Match Window</div>
+          </div>
+        </div>
+
+        {/* Live Horizon Verification Audit Table */}
+        <div className="border border-slate-200 rounded-lg overflow-hidden">
+          <div className="bg-slate-50 px-3 py-2 border-b border-slate-200 flex justify-between items-center">
+            <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+              Recent Verified Horizon Executions
+            </span>
+            <span className="text-[10px] text-slate-500">
+              Ordered by resolution timestamp
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs font-mono">
+              <thead className="bg-white border-b border-slate-200 text-[10px] text-slate-500 uppercase">
+                <tr>
+                  <th className="px-3 py-2">Time</th>
+                  <th className="px-3 py-2">Entry Price</th>
+                  <th className="px-3 py-2">Forecast Target</th>
+                  <th className="px-3 py-2">Actual Price</th>
+                  <th className="px-3 py-2">Closeness</th>
+                  <th className="px-3 py-2 text-right">Match Result</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {(telemetry?.prediction_verification?.recent_matches && telemetry.prediction_verification.recent_matches.length > 0) ? (
+                  telemetry.prediction_verification.recent_matches.slice().reverse().map((m) => (
+                    <tr key={m.id} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 text-slate-500">{m.time}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-900">${m.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                      <td className="px-3 py-2">
+                        <span className={m.predicted_dir === "UP" ? "text-blue-700 font-semibold" : "text-rose-600 font-semibold"}>
+                          {m.predicted_dir === "UP" ? "▲ UP" : "▼ DOWN"} (${m.target_price.toLocaleString(undefined, { minimumFractionDigits: 2 })})
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-slate-800">
+                        ${m.actual_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        <span className="text-[10px] text-slate-500 ml-1">
+                          ({m.price_diff >= 0 ? "+" : ""}${m.price_diff.toFixed(2)})
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 font-semibold text-slate-700">
+                        {m.proximity_pct.toFixed(1)}%
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {m.status === "HIT" ? (
+                          <span className="inline-block bg-blue-50 text-blue-700 border border-blue-200 font-bold px-2 py-0.5 rounded text-[10px]">
+                            HIT
+                          </span>
+                        ) : (
+                          <span className="inline-block bg-slate-100 text-slate-600 border border-slate-200 font-semibold px-2 py-0.5 rounded text-[10px]">
+                            MISS
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-4 text-center text-slate-400 font-sans text-xs">
+                      Awaiting initial 5-tick horizon resolution. Forecasts will match live in real-time...
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 

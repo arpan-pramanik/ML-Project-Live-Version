@@ -96,6 +96,14 @@ class TelemetryEngine:
             self.downstream: Dict[str, Any] = {}
             self.live_stream_status: Dict[str, Any] = {}
             self.price_stream: Dict[str, Any] = {}
+            self.prediction_verification: Dict[str, Any] = {
+                "total_verified": 0,
+                "correct_matches": 0,
+                "match_rate_pct": 0.0,
+                "avg_proximity_pct": 0.0,
+                "pending_count": 0,
+                "recent_matches": [],
+            }
 
     def log(self, message: str, level: str = "INFO", details: Optional[Dict[str, Any]] = None):
         t_str = time.strftime("%H:%M:%S") + f".{int((time.time() % 1) * 1000):03d}"
@@ -137,11 +145,99 @@ class TelemetryEngine:
                 "downstream": self.downstream,
                 "live_stream_status": self.live_stream_status,
                 "price_stream": self.price_stream,
+                "prediction_verification": self.prediction_verification,
             }
 
 
 TELEMETRY = TelemetryEngine()
 STREAM_THREAD: Optional[threading.Thread] = None
+
+
+class DelayedHorizonPredictionTracker:
+    """Tracks model forward predictions, waits for the horizon to elapse, and matches against actual price reality."""
+
+    def __init__(self, horizon_ticks: int = 5, max_history: int = 50):
+        self.horizon_ticks = horizon_ticks
+        self.max_history = max_history
+        self.pending: List[Dict[str, Any]] = []
+        self.resolved: collections.deque = collections.deque(maxlen=max_history)
+        self.next_id = 1
+        self.total_verified = 0
+        self.correct_matches = 0
+
+    def add_prediction(self, price: float, predicted_dir: str, target_price: float, confidence: float):
+        self.pending.append({
+            "id": self.next_id,
+            "created_at": time.time(),
+            "time_str": time.strftime("%H:%M:%S"),
+            "entry_price": round(price, 2),
+            "predicted_dir": predicted_dir,
+            "target_price": round(target_price, 2),
+            "confidence": round(confidence, 1),
+            "remaining_ticks": self.horizon_ticks,
+            "horizon": self.horizon_ticks,
+        })
+        self.next_id += 1
+
+    def update(self, current_price: float) -> List[Dict[str, Any]]:
+        """Advance pending horizons and resolve any predictions that matured."""
+        newly_resolved = []
+        still_pending = []
+
+        for p in self.pending:
+            p["remaining_ticks"] -= 1
+            if p["remaining_ticks"] <= 0:
+                entry = p["entry_price"]
+                target = p["target_price"]
+                actual = round(current_price, 2)
+                
+                price_diff = actual - entry
+                actual_dir = "UP" if price_diff >= 0 else "DOWN"
+                is_hit = (actual_dir == p["predicted_dir"])
+                
+                err = abs(actual - target)
+                denom = max(1.0, entry * 0.005) # 0.5% scale for proximity calculation
+                proximity = max(0.0, min(100.0, 100.0 - (err / denom * 20.0)))
+                
+                self.total_verified += 1
+                if is_hit:
+                    self.correct_matches += 1
+
+                record = {
+                    "id": p["id"],
+                    "time": p["time_str"],
+                    "entry_price": entry,
+                    "predicted_dir": p["predicted_dir"],
+                    "target_price": target,
+                    "actual_price": actual,
+                    "actual_dir": actual_dir,
+                    "price_diff": round(price_diff, 2),
+                    "status": "HIT" if is_hit else "MISS",
+                    "proximity_pct": round(proximity, 1),
+                    "confidence": p["confidence"],
+                }
+                self.resolved.append(record)
+                newly_resolved.append(record)
+            else:
+                still_pending.append(p)
+
+        self.pending = still_pending
+        return newly_resolved
+
+    def get_summary(self) -> Dict[str, Any]:
+        recent = list(self.resolved)
+        recent_hits = sum(1 for r in recent if r["status"] == "HIT")
+        rate = (recent_hits / len(recent) * 100.0) if recent else 0.0
+        avg_prox = (sum(r["proximity_pct"] for r in recent) / len(recent)) if recent else 0.0
+        return {
+            "total_verified": self.total_verified,
+            "correct_matches": self.correct_matches,
+            "match_rate_pct": round(rate, 1),
+            "avg_proximity_pct": round(avg_prox, 1),
+            "pending_count": len(self.pending),
+            "recent_matches": recent[-10:],
+        }
+
 
 
 CACHED_HARDWARE: Optional[Dict[str, Any]] = None
@@ -366,10 +462,28 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
 
         X_init = np.array([s[0] for s in warmup_samples], dtype=np.float32)
         y_init = np.array([s[1] for s in warmup_samples], dtype=int)
+        prices_init = np.array([float(s[2].get("price", 0.0)) for s in warmup_samples], dtype=np.float32)
 
         TELEMETRY.stage = "MODEL_INIT"
         model = build_model(model_key, detector_name)
-        model.fit_initial(X_init, y_init)
+
+        if hasattr(model, "fit_deep_history") and len(warmup_samples) > 100:
+            TELEMETRY.stage = "PRETRAINING_GRAPH_MEMORY"
+            TELEMETRY.total_samples = len(warmup_samples)
+            TELEMETRY.log(f"Deep pre-training Concept Graph Memory across {len(warmup_samples)} historical periods (2019 to today)...")
+
+            def on_deep_progress(idx, total, mdl):
+                TELEMETRY.current_sample = idx
+                if hasattr(mdl, "get_graph_state"):
+                    TELEMETRY.graph_memory = mdl.get_graph_state()
+                regime_id = getattr(mdl, "last_regime_id", 0)
+                action = getattr(mdl, "last_action", "STABLE")
+                if idx % 500 == 0 or idx == total:
+                    TELEMETRY.log(f"Graph Memory: Trained {idx}/{total} historical candles | Active: Regime #{regime_id} ({action})")
+
+            model.fit_deep_history(X_init, y_init, prices=prices_init, progress_callback=on_deep_progress)
+        else:
+            model.fit_initial(X_init, y_init)
 
         # Baseline models for comparative tracking
         static_model = StaticStreamingModel(name="Static Baseline")
@@ -381,6 +495,7 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
         TELEMETRY.stage = "LIVE_STREAMING"
         TELEMETRY.log(f"Live market streaming active on {product}! Ingesting real-time global trade ticks...")
 
+        pred_tracker = DelayedHorizonPredictionTracker(horizon_ticks=5, max_history=50)
         correct = 0
         total_streamed = 0
         rolling_correct = []
@@ -488,6 +603,29 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
                 "volatility": round(vol * 1000, 2),
                 "timestamp": time.time(),
             }
+
+            # 4. Predict -> Wait -> Match (Horizon Verification)
+            # Advance pending horizons and verify predictions against actual price reality
+            matured_matches = pred_tracker.update(price)
+            for m in matured_matches:
+                st = m["status"]
+                p_prox = m["proximity_pct"]
+                lvl = "INFO" if st == "HIT" else "WARNING"
+                TELEMETRY.log(
+                    f"Horizon Verification #{m['id']} [{st}]: Entry ${m['entry_price']:,.2f} -> Target ${m['target_price']:,.2f} ({m['predicted_dir']}) | Actual ${m['actual_price']:,.2f} ({m['actual_dir']}) | Closeness: {p_prox}%",
+                    level=lvl,
+                    details=m,
+                )
+
+            # Queue current forward prediction to be verified after 5 ticks
+            target_p = future_steps[-1]["price"] if future_steps else price
+            pred_tracker.add_prediction(
+                price=price,
+                predicted_dir="UP" if pred == 1 else "DOWN",
+                target_price=target_p,
+                confidence=conf_norm * 100,
+            )
+            TELEMETRY.prediction_verification = pred_tracker.get_summary()
 
             acc = correct / total_streamed
             w_acc = np.mean(rolling_correct) if rolling_correct else acc

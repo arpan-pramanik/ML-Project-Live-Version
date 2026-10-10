@@ -74,6 +74,36 @@ class GraphMemoryAdaptiveModel:
         for i in range(min(len(X), 100)):
             self.graph_memory.update_sample(X[i], int(y[i]))
 
+    def fit_deep_history(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        prices: Optional[np.ndarray] = None,
+        progress_callback=None,
+    ):
+        """Sequential prequential pre-training across the complete historical timeline.
+        
+        Learns real market regimes, spawns concept graph nodes, calibrates expert weights,
+        and builds transition Markov edges across 2019-present market cycles.
+        """
+        self.feature_dim = X.shape[1]
+        self.selected_feature_indices = list(range(self.feature_dim))
+
+        init_size = min(len(X), 60)
+        self.fit_initial(X[:init_size], y[:init_size])
+
+        # Process each historical period through the full drift-detection and graph-memory pipeline
+        for i in range(init_size, len(X)):
+            price_val = float(prices[i]) if prices is not None and i < len(prices) else None
+            self.update_sample(
+                x=X[i],
+                y=int(y[i]),
+                sample_idx=i,
+                price=price_val,
+            )
+            if progress_callback and (i % 250 == 0 or i == len(X) - 1):
+                progress_callback(i + 1, len(X), self)
+
     def predict_one(self, x: np.ndarray) -> int:
         """Ensemble prediction combining active graph expert and adaptive ensemble."""
         p_graph = float(self.graph_memory.predict_proba_one(x))
