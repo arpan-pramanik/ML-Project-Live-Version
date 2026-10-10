@@ -201,6 +201,24 @@ def test_balanced_micro_tick_labeling():
     assert s2[1] == 0  # DOWN
 
 
+def test_historical_candles_retention():
+    """Verify historical candles are retained permanently for TradingView charting."""
+    stream = CoinbaseLiveStream(product_id="BTC-USD", window_size=5)
+    stream.load_historical_data(full_history=True)
+    assert len(stream.historical_candles) >= 2800
+    assert stream.historical_candles[0]["timestamp"] <= 1546387200  # 2019-01-01
+    
+    # Simulate high volume of live ticks
+    stream.latest_price = 83000.0
+    for i in range(100):
+        stream.prices.append(83000.0 + i)
+    
+    recent = stream.get_recent_prices()
+    assert len(recent) >= 2801
+    assert recent[0]["timestamp"] <= 1546387200  # historical candle still present
+    assert recent[-1]["price"] == 83000.0        # live spot price attached at end
+
+
 if __name__ == "__main__":
     test_concept_graph_memory()
     test_downstream_risk_engine()
@@ -208,4 +226,5 @@ if __name__ == "__main__":
     test_coinbase_feature_extraction()
     test_forward_prediction_trajectory_5s_intervals()
     test_balanced_micro_tick_labeling()
+    test_historical_candles_retention()
     print("\nALL LIVE STREAM & GRAPH MEMORY TESTS PASSED!")

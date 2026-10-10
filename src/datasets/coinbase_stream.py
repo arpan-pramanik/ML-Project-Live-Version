@@ -51,6 +51,9 @@ class CoinbaseLiveStream:
         # UI history buffer: keeping up to 10,000 points to show full 7-year history + live ticks
         self.price_history = collections.deque(maxlen=10000)
 
+        # Permanent daily historical candles buffer (2019 to today) for TradingView chart
+        self.historical_candles: List[Dict[str, Any]] = []
+
         # Pending prediction queue for prequential ground-truth label assignment
         # Stores (sample_id, features, current_price, timestamp, metadata, target_tick)
         self.pending_samples = collections.deque(maxlen=10000)
@@ -151,6 +154,17 @@ class CoinbaseLiveStream:
                             writer.writerow(c)
                 except Exception:
                     pass
+
+        # Store permanent 2019-2026 daily historical candles for TradingView charting
+        self.historical_candles = [
+            {
+                "timestamp": float(c[0]),
+                "price": round(float(c[4]), 2),
+                "volume": float(c[5]),
+                "time_str": time.strftime("%Y-%m-%d", time.gmtime(float(c[0]))),
+            }
+            for c in candles
+        ]
 
         # Preload historical candles into stream pipeline
         for candle in candles:
@@ -445,5 +459,16 @@ class CoinbaseLiveStream:
         }
 
     def get_recent_prices(self) -> List[Dict[str, Any]]:
-        """Get recent real-time trade price points for UI plotting."""
+        """Get complete daily historical points (2019 to today) plus current live trade point for TradingView."""
+        if self.historical_candles:
+            res = list(self.historical_candles)
+            if self.latest_price > 0:
+                now_ts = self.latest_timestamp if self.latest_timestamp > 0 else time.time()
+                res.append({
+                    "timestamp": now_ts,
+                    "price": round(self.latest_price, 2),
+                    "volume": float(self.latest_volume),
+                    "time_str": time.strftime("%Y-%m-%d", time.gmtime(now_ts)),
+                })
+            return res
         return list(self.price_history)

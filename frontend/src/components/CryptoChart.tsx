@@ -15,6 +15,7 @@ export function CryptoChart({
     const chartRef = useRef<any>(null);
     const lineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
     const predSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const hasFittedRef = useRef<boolean>(false);
 
     useEffect(() => {
         if (!chartContainerRef.current) return;
@@ -100,6 +101,11 @@ export function CryptoChart({
             if (uniqueLineData.length > 0) {
                 lineSeriesRef.current.setData(uniqueLineData);
                 lastKnownPrice = uniqueLineData[uniqueLineData.length - 1];
+
+                if (!hasFittedRef.current && uniqueLineData.length > 10 && chartRef.current) {
+                    chartRef.current.timeScale().fitContent();
+                    hasFittedRef.current = true;
+                }
             }
         }
         
