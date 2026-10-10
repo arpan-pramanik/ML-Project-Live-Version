@@ -91,9 +91,12 @@ checkBackendReady()
     console.log(`[2/2] Starting Next.js Frontend on port ${FRONTEND_PORT}...\n`);
 
     // Determine package manager dynamically
+    const extraPath = path.join(process.env.HOME || "", ".npm-global", "bin");
+    const runEnv = { ...process.env, PATH: `${extraPath}:${process.env.PATH || ""}` };
+
     let hasBun = false;
     try {
-      execSync(process.platform === "win32" ? "where bun" : "which bun", { stdio: "ignore" });
+      execSync(process.platform === "win32" ? "where bun" : "which bun", { env: runEnv, stdio: "ignore" });
       hasBun = true;
     } catch {}
 
@@ -104,6 +107,7 @@ checkBackendReady()
 
     const frontendProcess = spawn(frontendCmd, frontendArgs, {
       cwd: ROOT_DIR,
+      env: runEnv,
       stdio: "inherit",
     });
 
