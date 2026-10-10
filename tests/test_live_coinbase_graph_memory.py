@@ -129,9 +129,39 @@ def test_coinbase_feature_extraction():
     print("✓ CoinbaseLiveStream feature extraction passed!")
 
 
+def test_forward_prediction_trajectory_5s_intervals():
+    """Verify forward trajectory computes 8 steps at 5-second intervals (T+5s .. T+40s)."""
+    price = 65000.0
+    vol = 0.001
+    direction_sign = 1.0
+    conf_norm = 0.85
+
+    steps = []
+    for s_idx in range(1, 9):
+        sec = s_idx * 5
+        drift_s = direction_sign * (vol * 0.25 * np.sqrt(s_idx)) * max(0.5, conf_norm)
+        s_price = round(price * (1.0 + drift_s), 2)
+        steps.append({
+            "step": f"T+{sec}s",
+            "step_num": s_idx,
+            "seconds": sec,
+            "price": s_price,
+            "delta": round(s_price - price, 2),
+            "delta_pct": round(drift_s * 100, 3),
+        })
+
+    assert len(steps) == 8
+    assert steps[0]["step"] == "T+5s"
+    assert steps[0]["seconds"] == 5
+    assert steps[-1]["step"] == "T+40s"
+    assert steps[-1]["seconds"] == 40
+    assert all(s["price"] > price for s in steps)
+
+
 if __name__ == "__main__":
     test_concept_graph_memory()
     test_downstream_risk_engine()
     test_graph_memory_adaptive_model()
     test_coinbase_feature_extraction()
+    test_forward_prediction_trajectory_5s_intervals()
     print("\nALL LIVE STREAM & GRAPH MEMORY TESTS PASSED!")

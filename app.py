@@ -584,17 +584,19 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
             vol = max(0.0002, min(0.008, vol))
             direction_sign = 1.0 if pred == 1 else -1.0
 
-            # 1. Next-Minute Prediction Trajectory (T+1m to T+8m micro-horizon for trajectory chart)
+            # 1. Forward Prediction Trajectory in 5-second intervals (T+5s to T+40s)
             future_steps = []
-            for m_idx in range(1, 9):
-                drift_m = direction_sign * (vol * np.sqrt(m_idx)) * max(0.5, conf_norm)
-                m_price = round(price * (1.0 + drift_m), 2)
+            for s_idx in range(1, 9):
+                sec = s_idx * 5
+                drift_s = direction_sign * (vol * 0.25 * np.sqrt(s_idx)) * max(0.5, conf_norm)
+                s_price = round(price * (1.0 + drift_s), 2)
                 future_steps.append({
-                    "step": f"T+{m_idx}m",
-                    "step_num": m_idx,
-                    "price": m_price,
-                    "delta": round(m_price - price, 2),
-                    "delta_pct": round(drift_m * 100, 3),
+                    "step": f"T+{sec}s",
+                    "step_num": s_idx,
+                    "seconds": sec,
+                    "price": s_price,
+                    "delta": round(s_price - price, 2),
+                    "delta_pct": round(drift_s * 100, 3),
                 })
 
             # 2. Next-Day Prediction (24h macro-horizon for TradingView daily chart)
@@ -608,7 +610,7 @@ def run_coinbase_live_pipeline(dataset_key: str, model_key: str, detector_name: 
                 "current_price": round(price, 2),
                 "direction": "UP" if pred == 1 else "DOWN",
                 "confidence": round(conf_norm * 100, 1),
-                "target_price": future_steps[0]["price"] if future_steps else price,  # Next minute target
+                "target_price": future_steps[0]["price"] if future_steps else price,  # Next 5-second target (T+5s)
                 "target_delta": future_steps[0]["delta"] if future_steps else 0.0,
                 "target_delta_pct": future_steps[0]["delta_pct"] if future_steps else 0.0,
                 "next_day_price": next_day_price,

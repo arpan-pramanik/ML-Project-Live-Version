@@ -143,6 +143,7 @@ interface PricePoint {
 interface FutureStep {
   step: string | number;
   step_num?: number;
+  seconds?: number;
   minute?: number;
   price: number;
   delta: number;
@@ -745,27 +746,27 @@ export default function ControlPanel() {
         </div>
       </section>
 
-      {/* 5. Live Crypto Price Chart with Next-Minute Predicted Trajectory */}
+      {/* 5. Live Crypto Price Chart with 5-Second Interval Forward Predicted Trajectory */}
       <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-200 pb-3 mb-3">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                LIVE MARKET STREAM & FORWARD PREDICTION TRAJECTORY (NEXT-MINUTE HORIZON)
+                LIVE MARKET STREAM & FORWARD PREDICTION TRAJECTORY (5-SECOND INTERVALS)
               </h2>
               <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold">
-                1m – 8m HORIZON
+                5s – 40s HORIZON
               </span>
             </div>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Dashed amber line exclusively displays the model&apos;s forward predicted price path for the next minutes (T+1 min to T+8 min).
+              Dashed amber line exclusively displays the model&apos;s forward predicted price path in 5-second intervals (T+5s to T+40s).
             </p>
           </div>
 
           {/* Visual Legend */}
           <div className="flex items-center gap-4 text-xs font-medium">
             <span className="flex items-center gap-1.5 text-amber-600 font-semibold">
-              <span className="w-3.5 h-0.5 bg-amber-500" /> Next-Minute Forecast (T+1m .. T+8m)
+              <span className="w-3.5 h-0.5 bg-amber-500" /> Next 5s Interval Forecast (T+5s .. T+40s)
             </span>
             <span className="flex items-center gap-1.5 text-slate-500">
               <span className="w-3 h-0.5 border-t border-dashed border-slate-400" /> Spot (T₀)
@@ -806,7 +807,7 @@ export default function ControlPanel() {
               NOW (SPOT PRICE)
             </text>
             <text x={boundaryX + 150} y={priceSvgHeight - 10} fontSize="9" fill="#d97706" fontWeight="bold" fontFamily="monospace">
-              PREDICTED NEXT-MINUTE HORIZON (T+1m .. T+8m) →
+              PREDICTED 5-SECOND HORIZON (T+5s .. T+40s) →
             </text>
 
             {/* Historical Real-Time Price Line (Solid Blue) */}
@@ -901,7 +902,7 @@ export default function ControlPanel() {
           </div>
 
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-            <div className="text-[10px] font-semibold text-slate-500 uppercase">NEXT-MINUTE TARGET (T+1m)</div>
+            <div className="text-[10px] font-semibold text-slate-500 uppercase">NEXT 5-SECOND TARGET (T+5s)</div>
             <div className="text-lg font-bold text-amber-700 mt-0.5 font-mono">
               ${(priceStream?.target_price || currentPrice).toLocaleString(undefined, {
                 minimumFractionDigits: 2,
