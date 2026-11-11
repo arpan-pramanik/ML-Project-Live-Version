@@ -1,4 +1,4 @@
-# Handling Concept Drift in Streaming Data: An Adaptive Framework for Dynamic Data
+# Handling Concept Drift in Streaming Data: Framework for Dynamic Data
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Next.js](https://img.shields.io/badge/next.js-16.3-black.svg)](https://nextjs.org/)
