@@ -19,6 +19,9 @@ function cleanupPort(port) {
     if (process.platform === "win32") {
       execSync(`for /f "tokens=5" %a in ('netstat -aon ^| findstr :${port}') do taskkill /f /pid %a >nul 2>&1 || exit 0`, { stdio: "ignore" });
     } else {
+      try {
+        execSync(`docker ps -q --filter "publish=${port}" | xargs -r docker stop >/dev/null 2>&1 || true`, { stdio: "ignore" });
+      } catch {}
       execSync(`fuser -k ${port}/tcp 2>/dev/null || true`, { stdio: "ignore" });
     }
   } catch {}
@@ -88,6 +91,37 @@ function checkBackendReady(retries = 20, delay = 300) {
 checkBackendReady()
   .then(() => {
     console.log(`[Backend] Verified ready at http://localhost:${BACKEND_PORT}`);
+
+    // Auto-start live market streaming pipeline with default model & detector
+    try {
+      const payload = JSON.stringify({
+        dataset: "coinbase_btc",
+        model: "xgboost_cuda",
+        detector: "adwin",
+        window_size: 50,
+      });
+      const autoReq = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: BACKEND_PORT,
+          path: "/api/run",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(payload),
+          },
+        },
+        (res) => {
+          console.log(`[Pipeline] Auto-started live Coinbase BTC stream (status: ${res.statusCode})`);
+        }
+      );
+      autoReq.on("error", () => {
+        console.log("[Pipeline] Note: Pipeline can be started from UI.");
+      });
+      autoReq.write(payload);
+      autoReq.end();
+    } catch {}
+
     console.log(`[2/2] Starting Next.js Frontend on port ${FRONTEND_PORT}...\n`);
 
     // Determine package manager dynamically
